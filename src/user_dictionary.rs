@@ -65,7 +65,7 @@ impl UserDictionary {
             std::fs::create_dir_all(parent)?;
         }
         let mut lines: Vec<String> = Vec::new();
-        lines.push(";; japinput ユーザー辞書".to_string());
+        lines.push(";; Enpitsu ユーザー辞書".to_string());
         let mut sorted_keys: Vec<&String> = self.entries.keys().collect();
         sorted_keys.sort();
         for reading in sorted_keys {
@@ -170,7 +170,7 @@ mod tests {
 
     #[test]
     fn save_and_load() {
-        let dir = std::env::temp_dir().join("japinput_test_ud");
+        let dir = std::env::temp_dir().join("enpitsu_test_ud");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("user_dict_test.txt");
 
@@ -197,7 +197,7 @@ mod tests {
 
     #[test]
     fn save_clears_dirty_flag() {
-        let dir = std::env::temp_dir().join("japinput_test_ud");
+        let dir = std::env::temp_dir().join("enpitsu_test_ud");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("user_dict_dirty_test.txt");
 

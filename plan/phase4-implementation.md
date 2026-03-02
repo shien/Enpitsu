@@ -85,7 +85,7 @@ installer/
 
 ```toml
 [package]
-name = "japinput"
+name = "enpitsu"
 version = "0.1.0"
 edition = "2024"
 
@@ -145,7 +145,7 @@ pub mod text_service;
 IME の識別に必要な GUID を定義する。
 
 ```rust
-//! japinput の CLSID および Profile GUID。
+//! Enpitsu の CLSID および Profile GUID。
 
 /// IME の CLSID (COM クラス識別子)。
 /// `uuidgen` で生成した一意な値。
@@ -805,7 +805,7 @@ use windows::Win32::UI::TextServices::*;
 
 use crate::guids;
 
-const IME_DISPLAY_NAME: &str = "japinput";
+const IME_DISPLAY_NAME: &str = "Enpitsu";
 const LANGID_JAPANESE: u16 = 0x0411;
 
 /// COM サーバーをレジストリに登録する。
@@ -854,8 +854,8 @@ fn register_categories() -> Result<()> {
 ```
 
 **動作確認:**
-- Windows 環境で管理者権限で `regsvr32 target\debug\japinput.dll` を実行
-- Windows の「設定 → 入力メソッド」に japinput が表示されること
+- Windows 環境で管理者権限で `regsvr32 target\debug\enpitsu.dll` を実行
+- Windows の「設定 → 入力メソッド」に Enpitsu が表示されること
 
 ---
 
@@ -864,7 +864,7 @@ fn register_categories() -> Result<()> {
 ### 10-1. installer/install.ps1 の作成
 
 ```powershell
-# japinput インストーラー
+# Enpitsu インストーラー
 # 管理者権限で実行すること
 
 param(
@@ -872,11 +872,11 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$DllName = "japinput.dll"
+$DllName = "enpitsu.dll"
 $DllSource = Join-Path $PSScriptRoot "..\target\release\$DllName"
 
 if ($Uninstall) {
-    Write-Host "japinput をアンインストールしています..."
+    Write-Host "Enpitsu をアンインストールしています..."
     regsvr32 /u /s $DllSource
     Write-Host "完了。"
 } else {
@@ -885,16 +885,16 @@ if ($Uninstall) {
         Write-Host "先に 'cargo build --release' を実行してください。"
         exit 1
     }
-    Write-Host "japinput をインストールしています..."
+    Write-Host "Enpitsu をインストールしています..."
     regsvr32 /s $DllSource
-    Write-Host "完了。入力メソッドの設定から japinput を追加してください。"
+    Write-Host "完了。入力メソッドの設定から Enpitsu を追加してください。"
 }
 ```
 
 **動作確認:**
 - Windows 環境で `.\installer\install.ps1` を管理者権限で実行
 - `.\installer\install.ps1 -Uninstall` でアンインストール
-- 入力メソッド一覧に japinput が追加/削除されること
+- 入力メソッド一覧に Enpitsu が追加/削除されること
 
 ---
 
@@ -918,12 +918,12 @@ cargo test               # 全テストパス
 
 手動テスト:
 
-1. `regsvr32 target\release\japinput.dll` で登録
-2. Windows の設定 → 入力メソッドに japinput を追加
-3. メモ帳を開き、japinput を選択
+1. `regsvr32 target\release\enpitsu.dll` で登録
+2. Windows の設定 → 入力メソッドに Enpitsu を追加
+3. メモ帳を開き、Enpitsu を選択
 4. ローマ字入力 → ひらがな変換を確認
 5. Space で変換候補表示、Enter で確定を確認
-6. `regsvr32 /u target\release\japinput.dll` で登録解除
+6. `regsvr32 /u target\release\enpitsu.dll` で登録解除
 
 ### 11-3. CLAUDE.md の更新
 

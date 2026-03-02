@@ -1,6 +1,6 @@
 //! 設定ファイルのパースとデフォルト値。
 //!
-//! `%APPDATA%\japinput\config.toml` から設定を読み込む。
+//! `%APPDATA%\enpitsu\config.toml` から設定を読み込む。
 //! 簡易 TOML パーサー（key = value 形式のサブセット）。
 
 use std::path::Path;
@@ -130,7 +130,7 @@ impl Config {
 
     /// デフォルト設定ファイルの内容を生成する。
     pub fn default_toml() -> String {
-        r#"# japinput 設定ファイル
+        r#"# Enpitsu 設定ファイル
 
 [general]
 # 入力モード切り替えキー: "zenkaku-hankaku" | "ctrl-space" | "alt-tilde"
@@ -278,7 +278,7 @@ toggle_key = "invalid-key"
 
     #[test]
     fn load_and_save_roundtrip() {
-        let dir = std::env::temp_dir().join("japinput_test_config");
+        let dir = std::env::temp_dir().join("enpitsu_test_config");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("config_test.toml");
 

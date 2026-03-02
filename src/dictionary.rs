@@ -303,7 +303,7 @@ mod tests {
     fn dedup_candidates() {
         // 同じ読みが複数行にあっても候補が重複しないこと
         let content = "かんじ /漢字/感じ/\nかんじ /漢字/幹事/\n";
-        let dir = std::env::temp_dir().join("japinput_test_dedup");
+        let dir = std::env::temp_dir().join("enpitsu_test_dedup");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("test_dedup.dict");
         std::fs::write(&path, content).unwrap();
@@ -324,7 +324,7 @@ mod tests {
         let content = "かんじ /漢字/感じ/\nにほん /日本/\n";
         let (encoded, _, _) = encoding_rs::EUC_JP.encode(content);
 
-        let dir = std::env::temp_dir().join("japinput_test");
+        let dir = std::env::temp_dir().join("enpitsu_test");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("test_eucjp.dict");
         std::fs::write(&path, &*encoded).unwrap();

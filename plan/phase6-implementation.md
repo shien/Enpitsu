@@ -192,7 +192,7 @@ mod tests {
 
     #[test]
     fn save_and_load() {
-        let dir = std::env::temp_dir().join("japinput_test_ud");
+        let dir = std::env::temp_dir().join("enpitsu_test_ud");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("user_dict_test.txt");
 
@@ -220,7 +220,7 @@ mod tests {
 
     #[test]
     fn save_clears_dirty_flag() {
-        let dir = std::env::temp_dir().join("japinput_test_ud");
+        let dir = std::env::temp_dir().join("enpitsu_test_ud");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("user_dict_dirty_test.txt");
 
@@ -311,7 +311,7 @@ impl UserDictionary {
             std::fs::create_dir_all(parent)?;
         }
         let mut lines: Vec<String> = Vec::new();
-        lines.push(";; japinput ユーザー辞書".to_string());
+        lines.push(";; Enpitsu ユーザー辞書".to_string());
         let mut sorted_keys: Vec<&String> = self.entries.keys().collect();
         sorted_keys.sort();
         for reading in sorted_keys {
@@ -636,7 +636,7 @@ Commit 時の学習処理:
 
 ## ステップ 3: Config — 設定ファイルのパースとデフォルト値 (TDD)
 
-`%APPDATA%\japinput\config.toml` から設定を読み込む。
+`%APPDATA%\enpitsu\config.toml` から設定を読み込む。
 TOML パーサーは外部クレートを使わず、簡易実装（key = value 形式）とする。
 
 ### 3-1. 設計方針
@@ -644,7 +644,7 @@ TOML パーサーは外部クレートを使わず、簡易実装（key = value 
 設定項目:
 
 ```toml
-# japinput 設定ファイル
+# Enpitsu 設定ファイル
 
 [general]
 # 入力モード切り替えキー: "zenkaku-hankaku" | "ctrl-space" | "alt-tilde"
@@ -782,7 +782,7 @@ toggle_key = "invalid-key"
 
     #[test]
     fn load_and_save_roundtrip() {
-        let dir = std::env::temp_dir().join("japinput_test_config");
+        let dir = std::env::temp_dir().join("enpitsu_test_config");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("config_test.toml");
 
@@ -813,7 +813,7 @@ toggle_key = "invalid-key"
 ```rust
 //! 設定ファイルのパースとデフォルト値。
 //!
-//! `%APPDATA%\japinput\config.toml` から設定を読み込む。
+//! `%APPDATA%\enpitsu\config.toml` から設定を読み込む。
 //! 簡易 TOML パーサー（key = value 形式のサブセット）。
 
 use std::path::Path;
@@ -912,7 +912,7 @@ impl Config {
     }
 
     pub fn default_toml() -> String {
-        r#"# japinput 設定ファイル
+        r#"# Enpitsu 設定ファイル
 
 [general]
 # 入力モード切り替えキー: "zenkaku-hankaku" | "ctrl-space" | "alt-tilde"
@@ -965,7 +965,7 @@ pub mod user_dictionary;
 ### 5-1. コマンドラインオプション追加
 
 ```
-japinput [--dict <path>] [--user-dict <path>] [--config <path>]
+enpitsu [--dict <path>] [--user-dict <path>] [--config <path>]
 ```
 
 ### 5-2. 実装
@@ -1016,11 +1016,11 @@ fn main() {
 
 ```powershell
 # インストール処理に追加:
-# 1. %APPDATA%\japinput\ ディレクトリの作成
+# 1. %APPDATA%\enpitsu\ ディレクトリの作成
 # 2. デフォルト config.toml の配置
 # 3. dict/ ディレクトリの辞書ファイルを DLL と同じ場所にコピー
 
-$appDataDir = Join-Path $env:APPDATA "japinput"
+$appDataDir = Join-Path $env:APPDATA "enpitsu"
 if (-not (Test-Path $appDataDir)) {
     New-Item -ItemType Directory -Path $appDataDir -Force
     Write-Host "設定ディレクトリを作成しました: $appDataDir"
@@ -1031,7 +1031,7 @@ $configPath = Join-Path $appDataDir "config.toml"
 if (-not (Test-Path $configPath)) {
     # デフォルト設定を書き込む
     Set-Content -Path $configPath -Value @"
-# japinput 設定ファイル
+# Enpitsu 設定ファイル
 
 [general]
 toggle_key = "zenkaku-hankaku"
@@ -1061,7 +1061,7 @@ if ($Uninstall) {
     # ... 既存の DLL 登録解除 ...
 
     if ($PurgeData) {
-        $appDataDir = Join-Path $env:APPDATA "japinput"
+        $appDataDir = Join-Path $env:APPDATA "enpitsu"
         if (Test-Path $appDataDir) {
             Remove-Item -Recurse -Force $appDataDir
             Write-Host "ユーザーデータを削除しました: $appDataDir"
@@ -1074,7 +1074,7 @@ if ($Uninstall) {
 ```
 
 **動作確認:**
-- Windows 環境でインストーラーを実行し、`%APPDATA%\japinput\` が作成されること
+- Windows 環境でインストーラーを実行し、`%APPDATA%\enpitsu\` が作成されること
 - `config.toml` がデフォルト内容で配置されること
 - アンインストール後もユーザーデータが残ること
 - `-PurgeData` フラグでユーザーデータが削除されること
@@ -1103,10 +1103,10 @@ fn ActivateEx(&self, ptim: Option<&ITfThreadMgr>, tid: u32, _flags: u32) -> Resu
     Ok(())
 }
 
-/// %APPDATA%\japinput\ 以下のパスを返す。
+/// %APPDATA%\enpitsu\ 以下のパスを返す。
 fn get_appdata_path(filename: &str) -> std::path::PathBuf {
     let appdata = std::env::var("APPDATA").unwrap_or_else(|_| ".".to_string());
-    std::path::PathBuf::from(appdata).join("japinput").join(filename)
+    std::path::PathBuf::from(appdata).join("enpitsu").join(filename)
 }
 ```
 
@@ -1130,8 +1130,8 @@ fn Deactivate(&self) -> Result<()> {
 ```
 
 **動作確認:**
-- Windows 環境で IME を有効化し、`%APPDATA%\japinput\config.toml` が読み込まれること
-- 変換を確定すると `%APPDATA%\japinput\user_dict.txt` が生成されること
+- Windows 環境で IME を有効化し、`%APPDATA%\enpitsu\config.toml` が読み込まれること
+- 変換を確定すると `%APPDATA%\enpitsu\user_dict.txt` が生成されること
 - IME を無効化して再有効化すると、前回の学習結果が反映されること
 
 ---
@@ -1141,7 +1141,7 @@ fn Deactivate(&self) -> Result<()> {
 ### 8-1. 内容
 
 ```markdown
-# japinput
+# Enpitsu
 
 Windows 向け日本語入力システム (IME)。
 
@@ -1177,7 +1177,7 @@ cargo build --release
 
 ## 使い方
 
-1. インストール後、タスクバーの言語バーから「japinput」を選択
+1. インストール後、タスクバーの言語バーから「Enpitsu」を選択
 2. ローマ字で入力し、Space で変換
 3. 候補を選択して Enter で確定
 4. Escape でキャンセル
@@ -1194,7 +1194,7 @@ cargo build --release
 
 ## 設定
 
-設定ファイルは `%APPDATA%\japinput\config.toml` に保存される。
+設定ファイルは `%APPDATA%\enpitsu\config.toml` に保存される。
 
 ## 開発
 
@@ -1261,9 +1261,9 @@ cargo test               # 全テストパス
 手動テスト:
 
 1. `installer/install.ps1` でインストール
-2. `%APPDATA%\japinput\config.toml` が作成されること
+2. `%APPDATA%\enpitsu\config.toml` が作成されること
 3. メモ帳で変換し、候補を選択して確定
-4. `%APPDATA%\japinput\user_dict.txt` が生成されること
+4. `%APPDATA%\enpitsu\user_dict.txt` が生成されること
 5. IME を再起動して、前回の学習結果が反映されること
 6. `config.toml` の `toggle_key` を変更して IME を再起動し、設定が反映されること
 7. `install.ps1 -Uninstall` で DLL が登録解除されること

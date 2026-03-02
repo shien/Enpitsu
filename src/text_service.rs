@@ -349,11 +349,11 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
     }
 }
 
-/// %APPDATA%\japinput\ 以下のパスを返す。
+/// %APPDATA%\enpitsu\ 以下のパスを返す。
 fn get_appdata_path(filename: &str) -> std::path::PathBuf {
     let appdata = std::env::var("APPDATA").unwrap_or_else(|_| ".".to_string());
     std::path::PathBuf::from(appdata)
-        .join("japinput")
+        .join("enpitsu")
         .join(filename)
 }
 

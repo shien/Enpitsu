@@ -8,7 +8,7 @@
 
 ### 6.1 ユーザー辞書
 
-- [ ] ユーザー辞書の保存・読み込み (`%APPDATA%\japinput\user_dict.txt`)
+- [ ] ユーザー辞書の保存・読み込み (`%APPDATA%\enpitsu\user_dict.txt`)
 - [ ] 学習機能: 選択した候補の優先度を上げる
 - [ ] 単語登録 UI（任意）
 
@@ -18,7 +18,7 @@
 
 ### 6.2 設定
 
-- [ ] 設定ファイル (`%APPDATA%\japinput\config.toml`)
+- [ ] 設定ファイル (`%APPDATA%\enpitsu\config.toml`)
 - [ ] キーバインドのカスタマイズ
 - [ ] 入力モード切り替えキーの設定
 
