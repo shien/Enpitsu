@@ -1,7 +1,7 @@
-use japinput::dictionary::Dictionary;
-use japinput::engine::{ConversionEngine, EngineCommand};
-use japinput::katakana;
-use japinput::user_dictionary::UserDictionary;
+use enpitsu::dictionary::Dictionary;
+use enpitsu::engine::{ConversionEngine, EngineCommand};
+use enpitsu::katakana;
+use enpitsu::user_dictionary::UserDictionary;
 use std::io::{self, BufRead, Write};
 use std::path::Path;
 
@@ -52,7 +52,7 @@ fn main() {
     let has_dict = dict.is_some();
     let mut engine = ConversionEngine::new_with_user_dict(dict, user_dict);
 
-    println!("japinput - ローマ字→かな変換デモ");
+    println!("Enpitsu - ローマ字→かな変換デモ");
     if has_dict {
         println!("辞書検索モード: ローマ字を入力すると漢字候補も表示します。");
     }

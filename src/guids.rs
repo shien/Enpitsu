@@ -1,4 +1,4 @@
-//! japinput の CLSID および Profile GUID。
+//! Enpitsu の CLSID および Profile GUID。
 
 /// IME の CLSID (COM クラス識別子)。
 /// {B5F7E5D1-7A3C-4E8B-9F2A-1D6C8E4A3B7F}

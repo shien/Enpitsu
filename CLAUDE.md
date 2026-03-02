@@ -1,10 +1,10 @@
-# CLAUDE.md — japinput
+# CLAUDE.md — Enpitsu
 
 This file provides guidance for AI assistants (including Claude Code) working in this repository.
 
 ## Project Overview
 
-**japinput** is a Windows 向け日本語入力システム (IME) written in Rust.
+**Enpitsu** is a Windows 向け日本語入力システム (IME) written in Rust.
 
 - **License:** MIT (Copyright 2026 shien)
 - **Default branch:** `main`
@@ -12,7 +12,7 @@ This file provides guidance for AI assistants (including Claude Code) working in
 ## Repository Structure
 
 ```
-japinput/
+Enpitsu/
 ├── Cargo.toml         # Rust package manifest (encoding_rs, windows)
 ├── src/
 │   ├── lib.rs         # Crate root (module declarations + DLL exports)
@@ -45,7 +45,7 @@ japinput/
 
 ```sh
 git clone <repo-url>
-cd japinput
+cd Enpitsu
 cargo build
 ```
 

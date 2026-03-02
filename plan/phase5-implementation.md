@@ -440,7 +440,7 @@ use windows::Win32::Graphics::Gdi::*;
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::*;
 
-const WINDOW_CLASS_NAME: &str = "japinput_candidate";
+const WINDOW_CLASS_NAME: &str = "enpitsu_candidate";
 
 /// 候補ウィンドウの状態。
 struct CandidateWindowState {
@@ -458,7 +458,7 @@ pub struct CandidateWindow {
 設計方針:
 - **WS_POPUP | WS_BORDER**: 枠なしポップアップ + 細い境界線
 - **WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE**: タスクバー非表示、最前面、フォーカス奪取なし
-- **ウィンドウクラス**: `japinput_candidate` という名前で登録
+- **ウィンドウクラス**: `enpitsu_candidate` という名前で登録
 - **WndProc**: WM_PAINT で候補リストを描画
 
 ### 5-2. CandidateWindow の公開 API
@@ -771,7 +771,7 @@ cargo test               # 全テストパス
 
 手動テスト:
 
-1. `regsvr32 target\release\japinput.dll` で登録
+1. `regsvr32 target\release\enpitsu.dll` で登録
 2. メモ帳でローマ字入力 → Space で変換
 3. 候補ウィンドウがカーソル付近にポップアップ表示されること
 4. ↓ / Space で次の候補、↑ で前の候補に移動、ハイライトが更新されること

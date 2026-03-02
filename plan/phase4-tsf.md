@@ -83,13 +83,13 @@ TSF は Windows の入力メソッドフレームワーク。IME は COM DLL と
 - [ ] 動作確認手順のドキュメント
 
 **動作確認:**
-- Windows 環境で `regsvr32 japinput.dll` が成功すること
-- Windows の設定 → 入力メソッド一覧に japinput が表示されること
+- Windows 環境で `regsvr32 enpitsu.dll` が成功すること
+- Windows の設定 → 入力メソッド一覧に Enpitsu が表示されること
 - メモ帳でローマ字→ひらがな変換が動作することを手動確認
 
 ## 完了条件
 
-- `regsvr32 japinput.dll` で IME がシステムに登録される
+- `regsvr32 enpitsu.dll` で IME がシステムに登録される
 - Windows の入力メソッド一覧に表示される
 - メモ帳等でローマ字→ひらがな変換が動作する（候補UIはまだなし）
 

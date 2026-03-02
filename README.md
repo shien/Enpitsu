@@ -36,7 +36,7 @@ cargo build --release
 .\installer\install.ps1 -Uninstall
 ```
 
-インストール後、Windows 設定 → 時刻と言語 → 言語 → 日本語 → キーボード から「japinput」を追加する。
+インストール後、Windows 設定 → 時刻と言語 → 言語 → 日本語 → キーボード から「Enpitsu」を追加する。
 
 ### 辞書ファイルの配置
 
@@ -47,7 +47,7 @@ DLL と同じディレクトリに `dict/SKK-JISYO.L` を配置する。
 
 ### 基本操作
 
-1. タスクバーの言語バーから「japinput」を選択して IME をオンにする
+1. タスクバーの言語バーから「Enpitsu」を選択して IME をオンにする
 2. ローマ字を入力するとリアルタイムでひらがなに変換される
 3. Space キーで漢字変換を開始
 4. 候補を選んで Enter で確定
@@ -195,7 +195,7 @@ happyou → はっぴょう
 
 ## 設定
 
-設定ファイルは `%APPDATA%\japinput\config.toml` に保存される。
+設定ファイルは `%APPDATA%\enpitsu\config.toml` に保存される。
 
 ### 設定項目一覧
 
@@ -227,7 +227,7 @@ ctrl_p = "none"
 
 ### ユーザー辞書
 
-ユーザー辞書は `%APPDATA%\japinput\user_dict.txt` に SKK 形式で自動保存される。
+ユーザー辞書は `%APPDATA%\enpitsu\user_dict.txt` に SKK 形式で自動保存される。
 `auto_learn = true`（デフォルト）の場合、変換で候補を確定するたびに学習データが記録され、
 次回以降の変換で選択した候補が優先表示される。
 

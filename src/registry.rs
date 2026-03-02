@@ -11,7 +11,7 @@ use windows::core::*;
 
 use crate::guids;
 
-const IME_DISPLAY_NAME: &str = "japinput";
+const IME_DISPLAY_NAME: &str = "Enpitsu";
 const LANGID_JAPANESE: u16 = 0x0411;
 
 /// COM サーバーをレジストリに登録する。

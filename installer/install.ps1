@@ -1,4 +1,4 @@
-# japinput インストーラー
+# Enpitsu インストーラー
 # 管理者権限で実行すること
 #
 # インストール:   .\install.ps1
@@ -9,7 +9,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$DllName = "japinput.dll"
+$DllName = "enpitsu.dll"
 $DllSource = Join-Path $PSScriptRoot "..\target\release\$DllName"
 
 if ($Uninstall) {
@@ -17,7 +17,7 @@ if ($Uninstall) {
         Write-Host "エラー: DLL が見つかりません: $DllSource"
         exit 1
     }
-    Write-Host "japinput をアンインストールしています..."
+    Write-Host "Enpitsu をアンインストールしています..."
     regsvr32 /u /s $DllSource
     if ($LASTEXITCODE -eq 0) {
         Write-Host "アンインストール完了。"
@@ -31,12 +31,12 @@ if ($Uninstall) {
         Write-Host "先に 'cargo build --release' を実行してください。"
         exit 1
     }
-    Write-Host "japinput をインストールしています..."
+    Write-Host "Enpitsu をインストールしています..."
     Write-Host "DLL: $DllSource"
     regsvr32 /s $DllSource
     if ($LASTEXITCODE -eq 0) {
         Write-Host "インストール完了。"
-        Write-Host "Windows の設定 → 時刻と言語 → 言語 → 日本語 → キーボード から japinput を追加してください。"
+        Write-Host "Windows の設定 → 時刻と言語 → 言語 → 日本語 → キーボード から Enpitsu を追加してください。"
     } else {
         Write-Host "エラー: regsvr32 が失敗しました (exit code: $LASTEXITCODE)"
         exit 1

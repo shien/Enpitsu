@@ -213,7 +213,7 @@ puroguraminngu	puroguramingu
 {"reading":"くらす","selected":"クラス","context":"Rustの","timestamp":1709312700}
 ```
 
-**ログの保存先:** `~/.japinput/history.jsonl`
+**ログの保存先:** `~/.enpitsu/history.jsonl`
 
 **動作確認:**
 - `cargo test` でログ記録・読み込みのユニットテストがパスすること
@@ -237,28 +237,28 @@ puroguraminngu	puroguramingu
 - [ ] `engine.rs` 初期化時に設定を読み込む
 - [ ] テスト: 設定ファイルの読み込み
 
-**設定ファイル例 (`~/.japinput/config.toml`):**
+**設定ファイル例 (`~/.enpitsu/config.toml`):**
 
 ```toml
 [dictionaries]
 # 辞書ファイル（上から順に優先）
 files = [
-    "~/.japinput/dict/SKK-JISYO.L",
-    "~/.japinput/dict/user_tech.txt",
-    "~/.japinput/dict/user_templates.txt",
+    "~/.enpitsu/dict/SKK-JISYO.L",
+    "~/.enpitsu/dict/user_tech.txt",
+    "~/.enpitsu/dict/user_templates.txt",
 ]
 
 [context_priority]
 # コンテキスト優先テーブル
-file = "~/.japinput/dict/context_priority.txt"
+file = "~/.enpitsu/dict/context_priority.txt"
 
 [typo_correction]
 # タイポ補正テーブル
-file = "~/.japinput/dict/typo_corrections.txt"
+file = "~/.enpitsu/dict/typo_corrections.txt"
 
 [history]
 # 確定ログの保存先
-file = "~/.japinput/history.jsonl"
+file = "~/.enpitsu/history.jsonl"
 # ログの最大行数（超えたら古いものから削除）
 max_entries = 100000
 ```
