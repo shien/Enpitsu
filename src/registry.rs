@@ -17,6 +17,13 @@ const LANGID_JAPANESE: u16 = 0x0411;
 
 /// COM サーバーをレジストリに登録する。
 pub fn register_server(dll_instance: HMODULE) -> Result<()> {
+    unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED).ok()? };
+    let result = register_server_inner(dll_instance);
+    unsafe { CoUninitialize() };
+    result
+}
+
+fn register_server_inner(dll_instance: HMODULE) -> Result<()> {
     let dll_path = get_dll_path(dll_instance)?;
     let clsid = guids::clsid_text_service();
     let clsid_str = guid_to_string(&clsid);
@@ -30,6 +37,13 @@ pub fn register_server(dll_instance: HMODULE) -> Result<()> {
 
 /// COM サーバーのレジストリ登録を解除する。
 pub fn unregister_server() -> Result<()> {
+    unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED).ok()? };
+    let result = unregister_server_inner();
+    unsafe { CoUninitialize() };
+    result
+}
+
+fn unregister_server_inner() -> Result<()> {
     let clsid = guids::clsid_text_service();
     let clsid_str = guid_to_string(&clsid);
 

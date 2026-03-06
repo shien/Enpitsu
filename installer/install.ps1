@@ -21,6 +21,8 @@ if ($Uninstall) {
     regsvr32 /u /s $DllSource
     if ($LASTEXITCODE -eq 0) {
         Write-Host "アンインストール完了。"
+        Write-Host "IME の DLL は各プロセスにロードされているため、PC を再起動してください。"
+        Write-Host "再起動後に DLL ファイルを削除できます。"
     } else {
         Write-Host "エラー: regsvr32 /u が失敗しました (exit code: $LASTEXITCODE)"
         exit 1
@@ -36,7 +38,7 @@ if ($Uninstall) {
     regsvr32 /s $DllSource
     if ($LASTEXITCODE -eq 0) {
         Write-Host "インストール完了。"
-        Write-Host "Windows の設定 → 時刻と言語 → 言語 → 日本語 → キーボード から Enpitsu を追加してください。"
+        Write-Host "Windows の設定 → 時刻と言語 → 言語と地域 → 日本語 → 言語のオプション → インストールされているキーボード → キーボードの追加 から Enpitsu を追加してください。"
     } else {
         Write-Host "エラー: regsvr32 が失敗しました (exit code: $LASTEXITCODE)"
         exit 1
