@@ -21,6 +21,8 @@ if ($Uninstall) {
     regsvr32 /u /s $DllSource
     if ($LASTEXITCODE -eq 0) {
         Write-Host "アンインストール完了。"
+        Write-Host "IME の DLL は各プロセスにロードされているため、PC を再起動してください。"
+        Write-Host "再起動後に DLL ファイルを削除できます。"
     } else {
         Write-Host "エラー: regsvr32 /u が失敗しました (exit code: $LASTEXITCODE)"
         exit 1

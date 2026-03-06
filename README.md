@@ -34,6 +34,7 @@ cargo build --release
 
 # アンインストール
 .\installer\install.ps1 -Uninstall
+# IME の DLL は各プロセスにロードされるため、アンインストール後は PC を再起動してください
 ```
 
 インストール後、Windows の設定 → 時刻と言語 → 言語と地域 → 日本語 → 言語のオプション → インストールされているキーボード → キーボードの追加 から「Enpitsu」を追加する。
