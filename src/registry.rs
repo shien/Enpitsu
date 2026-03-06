@@ -43,7 +43,7 @@ pub fn unregister_server() -> Result<()> {
 /// DLL のフルパスを取得する。
 fn get_dll_path(dll_instance: HMODULE) -> Result<String> {
     let mut buf = [0u16; 260];
-    let len = unsafe { GetModuleFileNameW(Some(dll_instance), &mut buf) } as usize;
+    let len = unsafe { GetModuleFileNameW(dll_instance, &mut buf) } as usize;
     if len == 0 {
         return Err(Error::from_win32());
     }
@@ -140,7 +140,7 @@ fn register_profile(clsid: &GUID) -> Result<()> {
             LANGID_JAPANESE,
             &guids::guid_profile(),
             &display_name,
-            &HSTRING::default(), // icon file
+            &[],                 // icon file
             0,                   // icon index
         )?;
     }
