@@ -24,6 +24,7 @@ pub(crate) mod dll_exports {
 
     use windows::Win32::Foundation::*;
     use windows::Win32::System::Com::*;
+    use windows::Win32::System::Ole::SELFREG_E_CLASS;
     use windows::core::*;
 
     use crate::class_factory::ClassFactory;
