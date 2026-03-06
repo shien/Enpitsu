@@ -4,6 +4,7 @@ use std::ffi::OsString;
 use std::os::windows::ffi::OsStringExt;
 
 use windows::Win32::Foundation::*;
+use windows::Win32::System::Com::*;
 use windows::Win32::System::LibraryLoader::GetModuleFileNameW;
 use windows::Win32::System::Registry::*;
 use windows::Win32::UI::TextServices::*;

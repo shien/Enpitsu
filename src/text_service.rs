@@ -91,7 +91,7 @@ impl EditSession {
 }
 
 impl ITfEditSession_Impl for EditSession_Impl {
-    fn DoEditSession(&self, ec: u32) -> Result<HRESULT> {
+    fn DoEditSession(&self, ec: u32) -> Result<()> {
         match &self.action {
             EditAction::SetText(text) => {
                 self.ensure_composition(ec)?;
@@ -115,7 +115,7 @@ impl ITfEditSession_Impl for EditSession_Impl {
                 self.finish_composition(ec)?;
             }
         }
-        Ok(S_OK)
+        Ok(())
     }
 }
 
@@ -249,6 +249,14 @@ impl ITfTextInputProcessorEx_Impl for TextService_Impl {
 
         Ok(())
     }
+}
+
+// --- ITfTextInputProcessor ---
+
+impl ITfTextInputProcessor_Impl for TextService_Impl {
+    fn Activate(&self, ptim: Option<&ITfThreadMgr>, tid: u32) -> Result<()> {
+        self.ActivateEx(ptim, tid, 0)
+    }
 
     fn Deactivate(&self) -> Result<()> {
         let thread_mgr = self.thread_mgr.lock().unwrap().take();
@@ -277,18 +285,6 @@ impl ITfTextInputProcessorEx_Impl for TextService_Impl {
         // TSF は TIP の Deactivate 時にアクティブな Composition を自動終了する。
         *self.composition.lock().unwrap() = None;
         Ok(())
-    }
-}
-
-// --- ITfTextInputProcessor ---
-
-impl ITfTextInputProcessor_Impl for TextService_Impl {
-    fn Activate(&self, ptim: Option<&ITfThreadMgr>, tid: u32) -> Result<()> {
-        self.ActivateEx(ptim, tid, 0)
-    }
-
-    fn Deactivate(&self) -> Result<()> {
-        ITfTextInputProcessorEx_Impl::Deactivate(self)
     }
 }
 
@@ -345,6 +341,14 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
     }
 
     fn OnKeyUp(&self, _pic: Option<&ITfContext>, _wparam: WPARAM, _lparam: LPARAM) -> Result<BOOL> {
+        Ok(FALSE)
+    }
+
+    fn OnPreservedKey(
+        &self,
+        _pic: Option<&ITfContext>,
+        _rguid: &GUID,
+    ) -> Result<BOOL> {
         Ok(FALSE)
     }
 }
