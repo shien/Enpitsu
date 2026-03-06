@@ -184,7 +184,7 @@ impl TextService {
             return None;
         }
         let mut buf = [0u16; 260];
-        let len = unsafe { GetModuleFileNameW(Some(hmodule), &mut buf) } as usize;
+        let len = unsafe { GetModuleFileNameW(hmodule, &mut buf) } as usize;
         if len == 0 {
             return None;
         }
@@ -238,7 +238,7 @@ impl ITfTextInputProcessorEx_Impl for TextService_Impl {
         let thread_mgr = ptim.ok_or(E_INVALIDARG)?.clone();
 
         let keystroke_mgr: ITfKeystrokeMgr = thread_mgr.cast()?;
-        let self_sink: ITfKeyEventSink = self.cast()?;
+        let self_sink: ITfKeyEventSink = unsafe { self.cast()? };
         unsafe {
             keystroke_mgr.AdviseKeyEventSink(tid, &self_sink, TRUE)?;
         }
@@ -347,7 +347,7 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
     fn OnPreservedKey(
         &self,
         _pic: Option<&ITfContext>,
-        _rguid: &GUID,
+        _rguid: *const GUID,
     ) -> Result<BOOL> {
         Ok(FALSE)
     }
