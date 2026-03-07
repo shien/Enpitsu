@@ -172,10 +172,8 @@ fn register_profile(clsid: &GUID) -> Result<()> {
             clsid,
             LANGID_JAPANESE,
             &guids::guid_profile(),
-            PCWSTR(display_name.as_ptr()),
-            display_name.len() as u32,
-            PCWSTR::null(),      // icon file
-            0,                   // icon file length
+            &display_name,       // description
+            &[],                 // icon file (none)
             0,                   // icon index
             HKL::default(),      // no substitute keyboard
             0,                   // preferred layout
