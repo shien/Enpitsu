@@ -31,6 +31,8 @@ pub const VK_F1: u16 = 0x70;
 pub const VK_OEM_COMMA: u16 = 0xBC;
 pub const VK_OEM_MINUS: u16 = 0xBD;
 pub const VK_OEM_PERIOD: u16 = 0xBE;
+pub const VK_KANJI: u16 = 0x19;
+pub const VK_OEM_3: u16 = 0xC0; // ` (backtick/tilde)
 
 /// 修飾キーの状態。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -201,6 +203,21 @@ pub fn map_key(
         VK_OEM_COMMA => Some(EngineCommand::InsertChar(',')),
         _ => None,
     }
+}
+
+/// Ctrl+Space のキー組み合わせかどうかを判定する。
+pub fn is_ctrl_space(vk: u16, modifiers: &Modifiers) -> bool {
+    vk == VK_SPACE && modifiers.ctrl && !modifiers.shift && !modifiers.alt
+}
+
+/// 半角/全角キーかどうかを判定する。
+pub fn is_zenkaku_hankaku(vk: u16, modifiers: &Modifiers) -> bool {
+    vk == VK_KANJI && !modifiers.ctrl && !modifiers.shift && !modifiers.alt
+}
+
+/// Alt+` のキー組み合わせかどうかを判定する。
+pub fn is_alt_tilde(vk: u16, modifiers: &Modifiers) -> bool {
+    vk == VK_OEM_3 && modifiers.alt && !modifiers.ctrl && !modifiers.shift
 }
 
 /// Ctrl+キーを設定に基づいて EngineCommand に変換する。
@@ -602,5 +619,52 @@ mod tests {
         let config = CtrlKeyConfig::default();
         let cmd = map_key(VK_OEM_COMMA, &Modifiers::none(), true, &config);
         assert_eq!(cmd, Some(EngineCommand::InsertChar(',')));
+    }
+
+    // === IME トグルキー検出 ===
+
+    #[test]
+    fn ctrl_space_detected() {
+        assert!(is_ctrl_space(VK_SPACE, &Modifiers::ctrl()));
+    }
+
+    #[test]
+    fn space_without_ctrl_is_not_toggle() {
+        assert!(!is_ctrl_space(VK_SPACE, &Modifiers::none()));
+    }
+
+    #[test]
+    fn ctrl_space_with_shift_is_not_toggle() {
+        let mods = Modifiers {
+            shift: true,
+            ctrl: true,
+            alt: false,
+        };
+        assert!(!is_ctrl_space(VK_SPACE, &mods));
+    }
+
+    #[test]
+    fn ctrl_space_with_alt_is_not_toggle() {
+        assert!(!is_ctrl_space(VK_SPACE, &Modifiers::ctrl_alt()));
+    }
+
+    #[test]
+    fn zenkaku_hankaku_detected() {
+        assert!(is_zenkaku_hankaku(VK_KANJI, &Modifiers::none()));
+    }
+
+    #[test]
+    fn zenkaku_hankaku_with_ctrl_is_not_toggle() {
+        assert!(!is_zenkaku_hankaku(VK_KANJI, &Modifiers::ctrl()));
+    }
+
+    #[test]
+    fn alt_tilde_detected() {
+        assert!(is_alt_tilde(VK_OEM_3, &Modifiers::alt()));
+    }
+
+    #[test]
+    fn tilde_without_alt_is_not_toggle() {
+        assert!(!is_alt_tilde(VK_OEM_3, &Modifiers::none()));
     }
 }

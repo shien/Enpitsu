@@ -10,20 +10,20 @@ use windows::Win32::UI::Input::KeyboardAndMouse::GetKeyState;
 use windows::Win32::UI::TextServices::*;
 use windows::core::*;
 
-use crate::config::Config;
+use crate::config::{Config, ToggleKey};
 use crate::dictionary::Dictionary;
-use crate::engine::{ConversionEngine, EngineOutput};
+use crate::engine::{ConversionEngine, EngineCommand, EngineOutput};
 use crate::key_mapping::{self, CtrlKeyConfig, Modifiers};
 use crate::user_dictionary::UserDictionary;
 
-/// デバッグログを OutputDebugString で出力する。
+/// デバッグログを OutputDebugStringW で出力する（UTF-8 文字化け防止）。
 #[cfg(windows)]
 fn debug_log(msg: &str) {
-    use windows::core::PCSTR;
-    use windows::Win32::System::Diagnostics::Debug::OutputDebugStringA;
-    let formatted = format!("[Enpitsu] {}\0", msg);
+    use windows::Win32::System::Diagnostics::Debug::OutputDebugStringW;
+    let formatted = format!("[Enpitsu] {}", msg);
+    let wide: Vec<u16> = formatted.encode_utf16().chain(std::iter::once(0)).collect();
     unsafe {
-        OutputDebugStringA(PCSTR(formatted.as_ptr()));
+        OutputDebugStringW(windows::core::PCWSTR(wide.as_ptr()));
     }
 }
 
@@ -59,17 +59,22 @@ impl EditSession {
     fn ensure_composition(&self, ec: u32) -> Result<()> {
         let mut comp = self.composition.lock().unwrap();
         if comp.is_some() {
+            debug_log("ensure_composition: already active");
             return Ok(());
         }
 
         unsafe {
             // カーソル位置の範囲を取得（テキストは挿入しない）
             let insert: ITfInsertAtSelection = self.context.cast()?;
+            debug_log("ensure_composition: InsertTextAtSelection (QUERYONLY)...");
             let range = insert.InsertTextAtSelection(ec, TF_IAS_QUERYONLY, &[])?;
+            debug_log("ensure_composition: InsertTextAtSelection succeeded");
 
             // その範囲で Composition を開始
             let ctx_comp: ITfContextComposition = self.context.cast()?;
+            debug_log("ensure_composition: StartComposition...");
             let new_comp = ctx_comp.StartComposition(ec, &range, None)?;
+            debug_log("ensure_composition: StartComposition succeeded");
 
             *comp = Some(new_comp);
         }
@@ -81,9 +86,13 @@ impl EditSession {
         let comp = self.composition.lock().unwrap();
         if let Some(ref composition) = *comp {
             unsafe {
+                debug_log("write_text: GetRange...");
                 let range = composition.GetRange()?;
+                debug_log("write_text: GetRange succeeded");
                 let wide: Vec<u16> = text.encode_utf16().collect();
+                debug_log(&format!("write_text: SetText (len={})...", wide.len()));
                 range.SetText(ec, 0, &wide)?;
+                debug_log("write_text: SetText succeeded");
             }
         }
         Ok(())
@@ -117,7 +126,10 @@ impl ITfEditSession_Impl for EditSession_Impl {
                     .and_then(|()| self.finish_composition(ec))
             }
             EditAction::CommitAndCompose { committed, display } => {
-                debug_log(&format!("DoEditSession: CommitAndCompose('{}', '{}')", committed, display));
+                debug_log(&format!(
+                    "DoEditSession: CommitAndCompose('{}', '{}')",
+                    committed, display
+                ));
                 self.ensure_composition(ec)
                     .and_then(|()| self.write_text(ec, committed))
                     .and_then(|()| self.finish_composition(ec))
@@ -148,6 +160,7 @@ pub struct TextService {
     ime_on: Mutex<bool>,
     composition: Arc<Mutex<Option<ITfComposition>>>,
     ctrl_config: CtrlKeyConfig,
+    toggle_key: ToggleKey,
 }
 
 impl TextService {
@@ -181,6 +194,7 @@ impl TextService {
         };
 
         let ctrl_config = config.keybind.clone();
+        let toggle_key = config.toggle_key.clone();
 
         debug_log("TextService::new() completed");
         Self {
@@ -190,6 +204,7 @@ impl TextService {
             ime_on: Mutex::new(false),
             composition: Arc::new(Mutex::new(None)),
             ctrl_config,
+            toggle_key,
         }
     }
 
@@ -223,6 +238,15 @@ impl TextService {
             .map(|p| p.to_path_buf())
     }
 
+    /// 指定されたキーがトグルキーかどうかを判定する。
+    fn is_toggle_key(&self, vk: u16, modifiers: &key_mapping::Modifiers) -> bool {
+        match &self.toggle_key {
+            ToggleKey::CtrlSpace => key_mapping::is_ctrl_space(vk, modifiers),
+            ToggleKey::ZenkakuHankaku => key_mapping::is_zenkaku_hankaku(vk, modifiers),
+            ToggleKey::AltTilde => key_mapping::is_alt_tilde(vk, modifiers),
+        }
+    }
+
     /// EngineOutput に基づいて EditSession を発行し、Composition を更新する。
     fn update_composition(&self, context: &ITfContext, output: &EngineOutput) -> Result<()> {
         let action = if !output.committed.is_empty() && !output.display.is_empty() {
@@ -251,11 +275,17 @@ impl TextService {
         .into();
 
         let tid = *self.client_id.lock().unwrap();
-        debug_log(&format!("update_composition: requesting edit session, tid={}", tid));
+        debug_log(&format!(
+            "update_composition: requesting edit session, tid={}",
+            tid
+        ));
         unsafe {
             let session_hr =
                 context.RequestEditSession(tid, &session, TF_ES_READWRITE | TF_ES_SYNC)?;
-            debug_log(&format!("update_composition: RequestEditSession returned hr=0x{:08X}", session_hr.0));
+            debug_log(&format!(
+                "update_composition: RequestEditSession returned hr=0x{:08X}",
+                session_hr.0
+            ));
         }
 
         Ok(())
@@ -268,10 +298,12 @@ impl ITfTextInputProcessorEx_Impl for TextService_Impl {
     fn ActivateEx(&self, ptim: Option<&ITfThreadMgr>, tid: u32, _flags: u32) -> Result<()> {
         debug_log(&format!("ActivateEx called, tid={}", tid));
 
-        let thread_mgr = ptim.ok_or_else(|| {
-            debug_log("ActivateEx: ptim is None");
-            E_INVALIDARG
-        })?.clone();
+        let thread_mgr = ptim
+            .ok_or_else(|| {
+                debug_log("ActivateEx: ptim is None");
+                E_INVALIDARG
+            })?
+            .clone();
 
         let keystroke_mgr: ITfKeystrokeMgr = thread_mgr.cast().map_err(|e| {
             debug_log(&format!("ActivateEx: ITfKeystrokeMgr cast failed: {:?}", e));
@@ -284,10 +316,12 @@ impl ITfTextInputProcessorEx_Impl for TextService_Impl {
             })?
         };
         unsafe {
-            keystroke_mgr.AdviseKeyEventSink(tid, &self_sink, TRUE).map_err(|e| {
-                debug_log(&format!("ActivateEx: AdviseKeyEventSink failed: {:?}", e));
-                e
-            })?;
+            keystroke_mgr
+                .AdviseKeyEventSink(tid, &self_sink, TRUE)
+                .map_err(|e| {
+                    debug_log(&format!("ActivateEx: AdviseKeyEventSink failed: {:?}", e));
+                    e
+                })?;
         }
 
         debug_log("ActivateEx: AdviseKeyEventSink succeeded");
@@ -355,10 +389,22 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
         let modifiers = modifiers_from_keyboard_state();
         let vk = wparam.0 as u16;
 
+        if self.is_toggle_key(vk, &modifiers) {
+            debug_log(&format!(
+                "OnTestKeyDown: vk=0x{:02X}, toggle key detected, EAT",
+                vk
+            ));
+            return Ok(TRUE);
+        }
+
         let result = key_mapping::map_key(vk, &modifiers, ime_on, &self.ctrl_config);
         debug_log(&format!(
             "OnTestKeyDown: vk=0x{:02X}, ime_on={}, shift={}, ctrl={}, alt={}, result={}",
-            vk, ime_on, modifiers.shift, modifiers.ctrl, modifiers.alt,
+            vk,
+            ime_on,
+            modifiers.shift,
+            modifiers.ctrl,
+            modifiers.alt,
             if result.is_some() { "EAT" } else { "PASS" }
         ));
 
@@ -369,16 +415,42 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
     }
 
     fn OnKeyDown(&self, pic: Option<&ITfContext>, wparam: WPARAM, _lparam: LPARAM) -> Result<BOOL> {
-        let ime_on = *self.ime_on.lock().unwrap();
         let modifiers = modifiers_from_keyboard_state();
         let vk = wparam.0 as u16;
+
+        // トグルキーの処理（IME のオン/オフに関わらず反応する）
+        if self.is_toggle_key(vk, &modifiers) {
+            let mut ime_on = self.ime_on.lock().unwrap();
+            *ime_on = !*ime_on;
+            let now_on = *ime_on;
+            drop(ime_on);
+            debug_log(&format!(
+                "OnKeyDown: IME toggled to {}",
+                if now_on { "ON" } else { "OFF" }
+            ));
+            if !now_on {
+                // IME をオフにする際、未確定入力をキャンセルする
+                let mut engine = self.engine.lock().unwrap();
+                let output = engine.process(EngineCommand::Cancel);
+                drop(engine);
+                if let Some(context) = pic {
+                    let _ = self.update_composition(context, &output);
+                }
+            }
+            return Ok(TRUE);
+        }
+
+        let ime_on = *self.ime_on.lock().unwrap();
 
         let Some(command) = key_mapping::map_key(vk, &modifiers, ime_on, &self.ctrl_config) else {
             debug_log(&format!("OnKeyDown: vk=0x{:02X} not mapped, passing", vk));
             return Ok(FALSE);
         };
 
-        debug_log(&format!("OnKeyDown: vk=0x{:02X}, command={:?}", vk, command));
+        debug_log(&format!(
+            "OnKeyDown: vk=0x{:02X}, command={:?}",
+            vk, command
+        ));
 
         let mut engine = self.engine.lock().unwrap();
         let output = engine.process(command);
@@ -414,11 +486,7 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
         Ok(FALSE)
     }
 
-    fn OnPreservedKey(
-        &self,
-        _pic: Option<&ITfContext>,
-        _rguid: *const GUID,
-    ) -> Result<BOOL> {
+    fn OnPreservedKey(&self, _pic: Option<&ITfContext>, _rguid: *const GUID) -> Result<BOOL> {
         Ok(FALSE)
     }
 }

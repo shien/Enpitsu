@@ -172,13 +172,13 @@ fn register_profile(clsid: &GUID) -> Result<()> {
             clsid,
             LANGID_JAPANESE,
             &guids::guid_profile(),
-            &display_name,       // description
-            &[],                 // icon file (none)
-            0,                   // icon index
-            HKL::default(),      // no substitute keyboard
-            0,                   // preferred layout
-            TRUE,                // enabled by default
-            0,                   // flags
+            &display_name,  // description
+            &[],            // icon file (none)
+            0,              // icon index
+            HKL::default(), // no substitute keyboard
+            0,              // preferred layout
+            TRUE,           // enabled by default
+            0,              // flags
         )?;
     }
 
