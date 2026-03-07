@@ -15,6 +15,23 @@ use crate::guids;
 const IME_DISPLAY_NAME: &str = "Enpitsu";
 const LANGID_JAPANESE: u16 = 0x0411;
 
+/// Windows Store / immersive アプリ対応を示すカテゴリ。
+/// このカテゴリを登録しないと Windows 10/11 の設定アプリがキーボードを一覧から除外する。
+const GUID_TFCAT_TIPCAP_IMMERSIVESUPPORT: GUID = GUID {
+    data1: 0x13A016DF,
+    data2: 0x560B,
+    data3: 0x46CD,
+    data4: [0x94, 0x7A, 0x4C, 0x3A, 0xF1, 0xE0, 0xE3, 0x5D],
+};
+
+/// システムトレイ対応を示すカテゴリ。
+const GUID_TFCAT_TIPCAP_SYSTRAYSUPPORT: GUID = GUID {
+    data1: 0x25504FB4,
+    data2: 0x7BAB,
+    data3: 0x4BC1,
+    data4: [0x9C, 0x69, 0xCF, 0x81, 0x89, 0x0F, 0x0E, 0xF5],
+};
+
 /// COM サーバーをレジストリに登録する。
 pub fn register_server(dll_instance: HMODULE) -> Result<()> {
     unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED).ok()? };
@@ -138,24 +155,32 @@ fn register_clsid(clsid_str: &str, dll_path: &str) -> Result<()> {
 }
 
 /// TSF プロファイルを登録する。
+///
+/// Windows 8 以降は `ITfInputProcessorProfileMgr::RegisterProfile` を使う。
+/// 旧 API (`ITfInputProcessorProfiles::AddLanguageProfile`) では
+/// Windows 設定アプリでキーボード追加が永続化されない問題がある。
 fn register_profile(clsid: &GUID) -> Result<()> {
-    let profiles: ITfInputProcessorProfiles =
+    use windows::Win32::Foundation::TRUE;
+    use windows::Win32::UI::Input::KeyboardAndMouse::HKL;
+
+    let profile_mgr: ITfInputProcessorProfileMgr =
         unsafe { CoCreateInstance(&CLSID_TF_InputProcessorProfiles, None, CLSCTX_INPROC_SERVER)? };
 
     unsafe {
-        profiles.Register(clsid)?;
-
-        let display_name: Vec<u16> = IME_DISPLAY_NAME
-            .encode_utf16()
-            .chain(std::iter::once(0))
-            .collect();
-        profiles.AddLanguageProfile(
+        let display_name: Vec<u16> = IME_DISPLAY_NAME.encode_utf16().collect();
+        profile_mgr.RegisterProfile(
             clsid,
             LANGID_JAPANESE,
             &guids::guid_profile(),
-            &display_name,
-            &[],                 // icon file
+            PCWSTR(display_name.as_ptr()),
+            display_name.len() as u32,
+            PCWSTR::null(),      // icon file
+            0,                   // icon file length
             0,                   // icon index
+            HKL::default(),      // no substitute keyboard
+            0,                   // preferred layout
+            TRUE,                // enabled by default
+            0,                   // flags
         )?;
     }
 
@@ -163,12 +188,18 @@ fn register_profile(clsid: &GUID) -> Result<()> {
 }
 
 /// TSF カテゴリを登録する。
+///
+/// `GUID_TFCAT_TIP_KEYBOARD` に加えて、`GUID_TFCAT_TIPCAP_IMMERSIVESUPPORT` と
+/// `GUID_TFCAT_TIPCAP_SYSTRAYSUPPORT` を登録する。これらがないと Windows 10/11 の
+/// 設定アプリがキーボードを一覧に表示しない（追加しても消える）。
 fn register_categories(clsid: &GUID) -> Result<()> {
     let category_mgr: ITfCategoryMgr =
         unsafe { CoCreateInstance(&CLSID_TF_CategoryMgr, None, CLSCTX_INPROC_SERVER)? };
 
     unsafe {
         category_mgr.RegisterCategory(clsid, &GUID_TFCAT_TIP_KEYBOARD, clsid)?;
+        category_mgr.RegisterCategory(clsid, &GUID_TFCAT_TIPCAP_IMMERSIVESUPPORT, clsid)?;
+        category_mgr.RegisterCategory(clsid, &GUID_TFCAT_TIPCAP_SYSTRAYSUPPORT, clsid)?;
     }
 
     Ok(())
@@ -185,12 +216,11 @@ fn unregister_clsid(clsid_str: &str) -> Result<()> {
 
 /// TSF プロファイルを解除する。
 fn unregister_profile(clsid: &GUID) -> Result<()> {
-    let profiles: ITfInputProcessorProfiles =
+    let profile_mgr: ITfInputProcessorProfileMgr =
         unsafe { CoCreateInstance(&CLSID_TF_InputProcessorProfiles, None, CLSCTX_INPROC_SERVER)? };
 
     unsafe {
-        let _ = profiles.RemoveLanguageProfile(clsid, LANGID_JAPANESE, &guids::guid_profile());
-        let _ = profiles.Unregister(clsid);
+        let _ = profile_mgr.UnregisterProfile(clsid, LANGID_JAPANESE, &guids::guid_profile(), 0);
     }
 
     Ok(())
@@ -203,6 +233,8 @@ fn unregister_categories(clsid: &GUID) -> Result<()> {
 
     unsafe {
         let _ = category_mgr.UnregisterCategory(clsid, &GUID_TFCAT_TIP_KEYBOARD, clsid);
+        let _ = category_mgr.UnregisterCategory(clsid, &GUID_TFCAT_TIPCAP_IMMERSIVESUPPORT, clsid);
+        let _ = category_mgr.UnregisterCategory(clsid, &GUID_TFCAT_TIPCAP_SYSTRAYSUPPORT, clsid);
     }
 
     Ok(())
