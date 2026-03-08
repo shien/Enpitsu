@@ -133,13 +133,8 @@ eprintln!("[Engine::process] state={:?} command={:?}", self.state, command);
 eprintln!("[Engine::process] → state={:?} output={:?}", self.state, &result);
 ```
 
-デバッグ出力は `cfg(debug_assertions)` で制御する:
-```rust
-#[cfg(debug_assertions)]
-eprintln!("[InputState::feed_char] ...");
-```
-
-これにより `cargo test` や `cargo run` ではデバッグ出力が表示され、`cargo build --release` では除外される。
+デバッグ出力は常に `eprintln!` で出力する（`cfg(debug_assertions)` は使わない）。
+完成が近づいてから除外を検討する。
 
 ## 実装フェーズ
 
@@ -350,7 +345,7 @@ eprintln!("[InputState::feed_char] ...");
 cargo test -- --nocapture
 ```
 
-`#[cfg(debug_assertions)]` 付きの `eprintln!` が表示される。
+`eprintln!` のログが表示される。
 
 ### 特定テストのデバッグ
 
@@ -364,7 +359,7 @@ cargo test move_left -- --nocapture
 cargo run -- --dict dict/SKK-JISYO.L
 ```
 
-デバッグビルドなので `eprintln!` のログが stderr に出力される。
+`eprintln!` のログが stderr に出力される。
 
 ### デバッグ出力の形式
 
@@ -377,8 +372,4 @@ cargo run -- --dict dict/SKK-JISYO.L
 [Engine::process] → state=Composing cursor_pos=1 display='かき'
 ```
 
-### リリースビルドではデバッグ出力を除外
-
-```sh
-cargo build --release  # デバッグ出力なし
-```
+デバッグ出力は完成が近づくまで常に有効にしておく。除外は後で検討する。
