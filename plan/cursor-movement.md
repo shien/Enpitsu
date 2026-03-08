@@ -64,6 +64,7 @@ pub struct InputState {
 |---------|------|
 | `move_left()` | カーソルを1文字左に移動。pending があれば先に flush。`output_before` 末尾から `output_after` 先頭へ1文字移動 |
 | `move_right()` | カーソルを1文字右に移動。pending があれば先に flush。`output_after` 先頭から `output_before` 末尾へ1文字移動 |
+| `delete()` | カーソル後ろの1文字を削除。pending があれば先に flush。`output_after` 先頭の1文字を除去。末尾なら何もしない |
 | `cursor_pos()` | カーソル位置を返す（`output_before.chars().count() + pending.chars().count()`） |
 | `display()` | 表示用文字列を返す（`output_before + pending + output_after`） |
 | `output_before()` | カーソル前の確定ひらがなを返す |
@@ -76,6 +77,7 @@ pub enum EngineCommand {
     // ... 既存 ...
     CursorLeft,   // カーソルを左に移動
     CursorRight,  // カーソルを右に移動
+    Delete,       // カーソル後ろの1文字を削除
 }
 ```
 
@@ -93,23 +95,25 @@ pub struct EngineOutput {
 ### key_mapping の変更
 
 ```
-VK_LEFT  → EngineCommand::CursorLeft
-VK_RIGHT → EngineCommand::CursorRight
+VK_LEFT   → EngineCommand::CursorLeft
+VK_RIGHT  → EngineCommand::CursorRight
+VK_DELETE → EngineCommand::Delete
 ```
 
 Emacs プリセット:
 ```
 Ctrl+B → EngineCommand::CursorLeft
 Ctrl+F → EngineCommand::CursorRight
+Ctrl+D → EngineCommand::Delete
 ```
 
 ### エンジン状態ごとの振る舞い
 
-| 状態 | CursorLeft | CursorRight |
-|------|-----------|-------------|
-| Direct | 無視（empty_output） | 無視（empty_output） |
-| Composing | `input.move_left()` → composing_output | `input.move_right()` → composing_output |
-| Converting | 無視（converting_output） | 無視（converting_output） |
+| 状態 | CursorLeft | CursorRight | Delete |
+|------|-----------|-------------|--------|
+| Direct | 無視（empty_output） | 無視（empty_output） | 無視（empty_output） |
+| Composing | `input.move_left()` → composing_output | `input.move_right()` → composing_output | `input.delete()` → composing_output（空になったら Direct へ） |
+| Converting | 無視（converting_output） | 無視（converting_output） | 無視（converting_output） |
 
 ### デバッグ出力
 
@@ -121,10 +125,12 @@ eprintln!("[InputState::feed_char] ch='{}' before='{}'|pending='{}'|after='{}'",
     ch, self.output_before, self.pending, self.output_after);
 ```
 
-**InputState カーソル移動:**
+**InputState カーソル移動・削除:**
 ```rust
 eprintln!("[InputState::move_left] before='{}'|pending='{}'|after='{}' → before='{}'|after='{}'",
     before_before, before_pending, before_after, self.output_before, self.output_after);
+eprintln!("[InputState::delete] before='{}'|pending='{}'|after='{}' → after='{}'",
+    self.output_before, self.pending, before_after, self.output_after);
 ```
 
 **Engine:**
@@ -184,7 +190,7 @@ eprintln!("[InputState::feed_char] ...");
 
 ### フェーズ 2: InputState にカーソル移動を追加
 
-#### タスク 2.1: Red — move_left / move_right のテスト追加
+#### タスク 2.1: Red — move_left / move_right / delete のテスト追加
 
 **テスト:**
 - `move_left_moves_one_char`: "かき" → move_left → before="か", after="き"
@@ -194,6 +200,10 @@ eprintln!("[InputState::feed_char] ...");
 - `move_right_moves_one_char`: before="か", after="き" → move_right → before="かき", after=""
 - `move_right_at_end_does_nothing`: before="かき", after="" → move_right → 変化なし
 - `move_right_flushes_pending`: pending="k" → move_right → flush → 移動
+- `delete_removes_char_after_cursor`: "かき" → move_left → delete → display="か"
+- `delete_at_end_does_nothing`: "かき" → delete → display="かき"（変化なし）
+- `delete_flushes_pending`: "かき" + pending="k" → move_left×2 → delete → pending flush, "か" の後ろの "k" を削除
+- `delete_empties_all`: "か" → move_left → delete → display=""
 - `cursor_pos_at_end`: "かき" → cursor_pos = 2
 - `cursor_pos_after_move_left`: "かき" → move_left → cursor_pos = 1
 - `feed_char_inserts_at_cursor`: "かき" → move_left → 'a' → display="かあき"（pending なし）
@@ -203,13 +213,14 @@ eprintln!("[InputState::feed_char] ...");
 **動作確認:**
 - `cargo test` → 新テストが**失敗する**ことを確認
 
-#### タスク 2.2: Green — move_left / move_right 実装
+#### タスク 2.2: Green — move_left / move_right / delete 実装
 
 - `move_left()`: pending があれば flush → `output_before` 末尾の1文字を `output_after` 先頭に移動
 - `move_right()`: pending があれば flush → `output_after` 先頭の1文字を `output_before` 末尾に移動
+- `delete()`: pending があれば flush → `output_after` 先頭の1文字を除去（末尾なら何もしない）
 - `cursor_pos()`: `output_before.chars().count() + pending.chars().count()`
 - `backspace()`: pending 空 & output_before 非空 → output_before の末尾を削除
-- デバッグ出力を `move_left`, `move_right` に追加
+- デバッグ出力を `move_left`, `move_right`, `delete` に追加
 
 **動作確認:**
 - `cargo test` → **全テスト通過**
@@ -233,6 +244,10 @@ eprintln!("[InputState::feed_char] ...");
 - `cursor_left_in_converting_is_noop`: Converting 状態では無視
 - `insert_at_cursor_in_composing`: カーソル移動後に文字入力 → 正しい位置に挿入
 - `backspace_at_cursor_in_composing`: カーソル移動後に Backspace → カーソル前を削除
+- `delete_at_cursor_in_composing`: カーソル移動後に Delete → カーソル後ろを削除
+- `delete_in_direct_is_noop`: Direct 状態では無視
+- `delete_in_converting_is_noop`: Converting 状態では無視
+- `delete_empties_composing_returns_to_direct`: Delete で全文字削除 → Direct 状態へ遷移
 - `cursor_pos_in_output`: `EngineOutput.cursor_pos` が正しい値を返す
 
 **動作確認:**
@@ -240,9 +255,10 @@ eprintln!("[InputState::feed_char] ...");
 
 #### タスク 3.2: Green — Engine にカーソル移動を実装
 
-- `EngineCommand` に `CursorLeft`, `CursorRight` を追加
+- `EngineCommand` に `CursorLeft`, `CursorRight`, `Delete` を追加
 - `EngineOutput` に `cursor_pos: usize` を追加（全 EngineOutput 生成箇所を更新）
-- `process()` の Composing マッチに CursorLeft/CursorRight を追加
+- `process()` の Composing マッチに CursorLeft/CursorRight/Delete を追加
+- Delete で全文字削除時は Direct 状態へ遷移
 - Direct / Converting では無視
 - Engine の `process()` にデバッグ出力を追加
 
@@ -263,22 +279,25 @@ eprintln!("[InputState::feed_char] ...");
 **テスト:**
 - `left_arrow_cursor_left`: VK_LEFT → CursorLeft
 - `right_arrow_cursor_right`: VK_RIGHT → CursorRight
+- `delete_key_delete`: VK_DELETE → Delete
 - `emacs_ctrl_b_cursor_left`: Emacs プリセットで Ctrl+B → CursorLeft
 - `emacs_ctrl_f_cursor_right`: Emacs プリセットで Ctrl+F → CursorRight
+- `emacs_ctrl_d_delete`: Emacs プリセットで Ctrl+D → Delete
 - `minimal_ctrl_b_returns_none`: Minimal プリセットでは Ctrl+B → None
 - `minimal_ctrl_f_returns_none`: Minimal プリセットでは Ctrl+F → None
+- `minimal_ctrl_d_returns_none`: Minimal プリセットでは Ctrl+D → None
 
 **動作確認:**
 - `cargo test` → 新テストが**失敗する**ことを確認
 
 #### タスク 4.2: Green — キーマッピング実装
 
-- `VK_LEFT` (0x25), `VK_RIGHT` (0x27) 定数を追加
-- `map_key()` に VK_LEFT → CursorLeft, VK_RIGHT → CursorRight を追加
-- `CtrlKeyConfig` に `ctrl_b`, `ctrl_f` フィールドを追加
-- Emacs プリセット: `ctrl_b = CursorLeft`, `ctrl_f = CursorRight`
-- Minimal / None プリセット: `ctrl_b = None`, `ctrl_f = None`
-- `map_ctrl_key()` に VK_B, VK_F のマッピングを追加
+- `VK_LEFT` (0x25), `VK_RIGHT` (0x27), `VK_DELETE` (0x2E) 定数を追加
+- `map_key()` に VK_LEFT → CursorLeft, VK_RIGHT → CursorRight, VK_DELETE → Delete を追加
+- `CtrlKeyConfig` に `ctrl_b`, `ctrl_f`, `ctrl_d` フィールドを追加
+- Emacs プリセット: `ctrl_b = CursorLeft`, `ctrl_f = CursorRight`, `ctrl_d = Delete`
+- Minimal / None プリセット: `ctrl_b = None`, `ctrl_f = None`, `ctrl_d = None`
+- `map_ctrl_key()` に VK_B, VK_F, VK_D のマッピングを追加
 
 **動作確認:**
 - `cargo test` → **全テスト通過**
@@ -297,16 +316,17 @@ eprintln!("[InputState::feed_char] ...");
 **テスト:**
 - `parse_ctrl_b_cursor_left`: `ctrl_b = "cursor_left"` → CursorLeft
 - `parse_ctrl_f_cursor_right`: `ctrl_f = "cursor_right"` → CursorRight
-- `emacs_preset_includes_ctrl_b_f`: Emacs プリセットで ctrl_b/ctrl_f がデフォルト設定される
+- `parse_ctrl_d_delete`: `ctrl_d = "delete"` → Delete
+- `emacs_preset_includes_ctrl_b_f_d`: Emacs プリセットで ctrl_b/ctrl_f/ctrl_d がデフォルト設定される
 
 **動作確認:**
 - `cargo test` → 新テストが**失敗する**ことを確認
 
 #### タスク 5.2: Green — 設定パーサー拡張
 
-- `ctrl_b`, `ctrl_f` の設定キーを追加
-- `"cursor_left"`, `"cursor_right"` の値をパース
-- プリセットから `ctrl_b`, `ctrl_f` を初期化
+- `ctrl_b`, `ctrl_f`, `ctrl_d` の設定キーを追加
+- `"cursor_left"`, `"cursor_right"`, `"delete"` の値をパース
+- プリセットから `ctrl_b`, `ctrl_f`, `ctrl_d` を初期化
 
 **動作確認:**
 - `cargo test` → **全テスト通過**
@@ -336,11 +356,11 @@ eprintln!("[InputState::feed_char] ...");
 | フェーズ | 新規テスト数 | 累計テスト数（既存含む） |
 |---------|------------|----------------------|
 | フェーズ 1 | 3 | 既存 + 3 |
-| フェーズ 2 | 12 | 既存 + 15 |
-| フェーズ 3 | 8 | 既存 + 23 |
-| フェーズ 4 | 6 | 既存 + 29 |
-| フェーズ 5 | 3 | 既存 + 32 |
-| フェーズ 6 | 0（手動確認） | 既存 + 32 |
+| フェーズ 2 | 16 | 既存 + 19 |
+| フェーズ 3 | 12 | 既存 + 31 |
+| フェーズ 4 | 9 | 既存 + 40 |
+| フェーズ 5 | 4 | 既存 + 44 |
+| フェーズ 6 | 0（手動確認） | 既存 + 44 |
 
 ## デバッグ方法
 
@@ -373,6 +393,7 @@ cargo run -- --dict dict/SKK-JISYO.L
 [InputState::move_left] before='かき'|pending=''|after='' → before='か'|pending=''|after='き'
 [InputState::move_right] before='か'|pending=''|after='き' → before='かき'|pending=''|after=''
 [InputState::backspace] before='かき'|pending=''|after='' → before='か'|pending=''|after=''
+[InputState::delete] before='か'|pending=''|after='き' → before='か'|pending=''|after=''
 [Engine::process] state=Composing command=CursorLeft
 [Engine::process] → state=Composing cursor_pos=1 display='かき'
 ```
