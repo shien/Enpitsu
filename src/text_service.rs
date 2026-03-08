@@ -27,6 +27,29 @@ fn debug_log(msg: &str) {
     }
 }
 
+// === CompositionSink ===
+
+/// TSF が Composition を外部から終了したときに通知を受けるシンク。
+///
+/// `StartComposition` に渡す必須パラメータ。
+/// アプリ側のリセット等で Composition が終了されたとき、内部状態をクリアする。
+#[implement(ITfCompositionSink)]
+struct CompositionSink {
+    composition: Arc<Mutex<Option<ITfComposition>>>,
+}
+
+impl ITfCompositionSink_Impl for CompositionSink_Impl {
+    fn OnCompositionTerminated(
+        &self,
+        _ecwrite: u32,
+        _pcomposition: Option<&ITfComposition>,
+    ) -> Result<()> {
+        debug_log("OnCompositionTerminated called");
+        *self.composition.lock().unwrap() = None;
+        Ok(())
+    }
+}
+
 // === EditSession ===
 
 /// EditSession 内で実行するアクション。
@@ -72,8 +95,12 @@ impl EditSession {
 
             // その範囲で Composition を開始
             let ctx_comp: ITfContextComposition = self.context.cast()?;
+            let sink: ITfCompositionSink = CompositionSink {
+                composition: Arc::clone(&self.composition),
+            }
+            .into();
             debug_log("ensure_composition: StartComposition...");
-            let new_comp = ctx_comp.StartComposition(ec, &range, None)?;
+            let new_comp = ctx_comp.StartComposition(ec, &range, &sink)?;
             debug_log("ensure_composition: StartComposition succeeded");
 
             *comp = Some(new_comp);
