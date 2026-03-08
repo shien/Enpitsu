@@ -18,11 +18,11 @@ Enpitsu/
 │   ├── lib.rs         # Crate root (module declarations + DLL exports)
 │   ├── romaji.rs      # ローマ字 → ひらがな変換
 │   ├── katakana.rs    # ひらがな → カタカナ変換
-│   ├── input_state.rs # 入力状態管理 (逐次入力、backspace)
+│   ├── input_state.rs # 入力状態管理 (逐次入力、backspace、カーソル移動、delete)
 │   ├── dictionary.rs  # SKK 辞書読み込み・検索
 │   ├── user_dictionary.rs # ユーザー辞書管理（学習・永続化）
 │   ├── candidate.rs   # 変換候補リスト管理
-│   ├── engine.rs      # 変換エンジン (状態機械・コマンド処理・ユーザー辞書連携)
+│   ├── engine.rs      # 変換エンジン (状態機械・コマンド処理・ユーザー辞書連携・カーソル移動)
 │   ├── key_mapping.rs # VirtualKey → EngineCommand 変換 (Ctrl+キー プリセット対応)
 │   ├── config.rs      # 設定ファイルのパース・デフォルト値 (keybind_preset 含む)
 │   ├── guids.rs       # CLSID, Profile GUID 定義
