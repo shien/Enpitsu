@@ -8,9 +8,11 @@ use crate::romaji;
 /// 入力状態を管理する構造体。
 #[derive(Debug, Clone)]
 pub struct InputState {
-    /// 確定したひらがな出力
-    output: String,
-    /// まだ確定していないローマ字バッファ
+    /// カーソル前の確定したひらがな出力
+    output_before: String,
+    /// カーソル後の確定したひらがな出力
+    output_after: String,
+    /// まだ確定していないローマ字バッファ（常に output_before と output_after の間）
     pending: String,
 }
 
@@ -18,39 +20,61 @@ impl InputState {
     /// 新しい InputState を作成する。
     pub fn new() -> Self {
         Self {
-            output: String::new(),
+            output_before: String::new(),
+            output_after: String::new(),
             pending: String::new(),
         }
     }
 
-    /// 1文字入力する。確定したひらがながあれば output に追加される。
+    /// 1文字入力する。確定したひらがながあれば output_before に追加される。
     pub fn feed_char(&mut self, ch: char) {
         self.pending.push(ch);
         let result = romaji::convert(&self.pending);
-        self.output.push_str(&result.output);
+        self.output_before.push_str(&result.output);
         self.pending = result.pending;
+        #[cfg(debug_assertions)]
+        eprintln!(
+            "[InputState::feed_char] ch='{}' before='{}'|pending='{}'|after='{}'",
+            ch, self.output_before, self.pending, self.output_after
+        );
     }
 
     /// 未確定バッファを確定する（末尾の "n" → "ん"）。
     pub fn flush(&mut self) {
         if self.pending == "n" {
-            self.output.push('ん');
+            self.output_before.push('ん');
             self.pending.clear();
         } else if !self.pending.is_empty() {
-            self.output.push_str(&self.pending);
+            self.output_before.push_str(&self.pending);
             self.pending.clear();
         }
+        #[cfg(debug_assertions)]
+        eprintln!(
+            "[InputState::flush] before='{}'|pending='{}'|after='{}'",
+            self.output_before, self.pending, self.output_after
+        );
     }
 
     /// バッファと出力をクリアする。
     pub fn reset(&mut self) {
-        self.output.clear();
+        self.output_before.clear();
+        self.output_after.clear();
         self.pending.clear();
     }
 
-    /// 確定済みの出力を返す。
-    pub fn output(&self) -> &str {
-        &self.output
+    /// 確定済みの出力を返す（output_before + output_after）。
+    pub fn output(&self) -> String {
+        format!("{}{}", self.output_before, self.output_after)
+    }
+
+    /// カーソル前の確定済み出力を返す。
+    pub fn output_before(&self) -> &str {
+        &self.output_before
+    }
+
+    /// カーソル後の確定済み出力を返す。
+    pub fn output_after(&self) -> &str {
+        &self.output_after
     }
 
     /// 未確定のバッファを返す。
@@ -58,18 +82,31 @@ impl InputState {
         &self.pending
     }
 
-    /// 末尾の1文字を削除する。pending があれば pending から、なければ output から削除。
+    /// 表示用文字列を返す（output_before + pending + output_after）。
+    pub fn display(&self) -> String {
+        format!(
+            "{}{}{}",
+            self.output_before, self.pending, self.output_after
+        )
+    }
+
+    /// 末尾の1文字を削除する。pending があれば pending から、なければ output_before から削除。
     pub fn backspace(&mut self) {
         if !self.pending.is_empty() {
             self.pending.pop();
         } else {
-            self.output.pop();
+            self.output_before.pop();
         }
+        #[cfg(debug_assertions)]
+        eprintln!(
+            "[InputState::backspace] before='{}'|pending='{}'|after='{}'",
+            self.output_before, self.pending, self.output_after
+        );
     }
 
     /// 出力と pending の両方が空かどうか。
     pub fn is_empty(&self) -> bool {
-        self.output.is_empty() && self.pending.is_empty()
+        self.output_before.is_empty() && self.output_after.is_empty() && self.pending.is_empty()
     }
 }
 
@@ -259,6 +296,36 @@ mod tests {
         assert_eq!(state.output(), "かき");
         state.backspace();
         assert_eq!(state.output(), "か");
+    }
+
+    // === output_before / output_after / display ===
+
+    #[test]
+    fn output_before_equals_output_initially() {
+        let mut state = InputState::new();
+        for ch in "ka".chars() {
+            state.feed_char(ch);
+        }
+        assert_eq!(state.output_before(), state.output());
+    }
+
+    #[test]
+    fn output_after_empty_initially() {
+        let mut state = InputState::new();
+        for ch in "ka".chars() {
+            state.feed_char(ch);
+        }
+        assert_eq!(state.output_after(), "");
+    }
+
+    #[test]
+    fn display_equals_output_plus_pending() {
+        let mut state = InputState::new();
+        for ch in "kak".chars() {
+            state.feed_char(ch);
+        }
+        let expected = format!("{}{}", state.output(), state.pending());
+        assert_eq!(state.display(), expected);
     }
 
     // === is_empty ===

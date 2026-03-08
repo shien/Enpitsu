@@ -154,8 +154,8 @@ fn register_profile(clsid: &GUID) -> Result<()> {
             LANGID_JAPANESE,
             &guids::guid_profile(),
             &display_name,
-            &[],                 // icon file
-            0,                   // icon index
+            &[], // icon file
+            0,   // icon index
         )?;
     }
 
