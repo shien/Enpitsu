@@ -402,7 +402,8 @@ impl ITfTextInputProcessor_Impl for TextService_Impl {
 // --- ITfKeyEventSink ---
 
 impl ITfKeyEventSink_Impl for TextService_Impl {
-    fn OnSetFocus(&self, _fforeground: BOOL) -> Result<()> {
+    fn OnSetFocus(&self, fforeground: BOOL) -> Result<()> {
+        debug_log(&format!("OnSetFocus: fforeground={}", fforeground.0));
         Ok(())
     }
 
@@ -416,30 +417,19 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
         let modifiers = modifiers_from_keyboard_state();
         let vk = wparam.0 as u16;
 
+        let is_toggle = self.is_toggle_key(vk, &modifiers);
+        let result = if is_toggle {
+            true
+        } else {
+            key_mapping::map_key(vk, &modifiers, ime_on, &self.ctrl_config).is_some()
+        };
+
         debug_log(&format!(
-            "OnTestKeyDown: vk=0x{:02X}, ime_on={}, shift={}, ctrl={}, alt={}",
-            vk, ime_on, modifiers.shift, modifiers.ctrl, modifiers.alt
+            "TEST vk=0x{:02X} ctrl={} ime={} toggle={} eat={}",
+            vk, modifiers.ctrl, ime_on, is_toggle, result
         ));
 
-        if self.is_toggle_key(vk, &modifiers) {
-            debug_log(&format!(
-                "OnTestKeyDown: vk=0x{:02X}, toggle key detected, EAT",
-                vk
-            ));
-            return Ok(TRUE);
-        }
-
-        let result = key_mapping::map_key(vk, &modifiers, ime_on, &self.ctrl_config);
-        debug_log(&format!(
-            "OnTestKeyDown: vk=0x{:02X}, result={}",
-            vk,
-            if result.is_some() { "EAT" } else { "PASS" }
-        ));
-
-        match result {
-            Some(_) => Ok(TRUE),
-            None => Ok(FALSE),
-        }
+        Ok(if result { TRUE } else { FALSE })
     }
 
     fn OnKeyDown(&self, pic: Option<&ITfContext>, wparam: WPARAM, _lparam: LPARAM) -> Result<BOOL> {
