@@ -453,7 +453,10 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
                 let output = engine.process(EngineCommand::Cancel);
                 drop(engine);
                 if let Some(context) = pic {
-                    let _ = self.update_composition(context, &output);
+                    if let Err(e) = self.update_composition(context, &output) {
+                        debug_log(&format!("OnKeyDown: toggle off update_composition FAILED: {:?}", e));
+                        return Err(e);
+                    }
                 }
             }
             return Ok(TRUE);
@@ -483,7 +486,10 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
         if let Some(context) = pic {
             match self.update_composition(context, &output) {
                 Ok(()) => debug_log("OnKeyDown: update_composition succeeded"),
-                Err(e) => debug_log(&format!("OnKeyDown: update_composition FAILED: {:?}", e)),
+                Err(e) => {
+                    debug_log(&format!("OnKeyDown: update_composition FAILED: {:?}", e));
+                    return Err(e);
+                }
             }
         } else {
             debug_log("OnKeyDown: context is None, skipping composition update");
