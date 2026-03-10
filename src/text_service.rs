@@ -413,6 +413,7 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
         wparam: WPARAM,
         _lparam: LPARAM,
     ) -> Result<BOOL> {
+        debug_log(&format!("OnTestKeyDown ENTERED: wparam=0x{:02X}", wparam.0));
         let ime_on = *self.ime_on.lock().unwrap();
         let modifiers = modifiers_from_keyboard_state();
         let vk = wparam.0 as u16;
