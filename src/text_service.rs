@@ -416,6 +416,11 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
         let modifiers = modifiers_from_keyboard_state();
         let vk = wparam.0 as u16;
 
+        debug_log(&format!(
+            "OnTestKeyDown: vk=0x{:02X}, ime_on={}, shift={}, ctrl={}, alt={}",
+            vk, ime_on, modifiers.shift, modifiers.ctrl, modifiers.alt
+        ));
+
         if self.is_toggle_key(vk, &modifiers) {
             debug_log(&format!(
                 "OnTestKeyDown: vk=0x{:02X}, toggle key detected, EAT",
@@ -426,12 +431,8 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
 
         let result = key_mapping::map_key(vk, &modifiers, ime_on, &self.ctrl_config);
         debug_log(&format!(
-            "OnTestKeyDown: vk=0x{:02X}, ime_on={}, shift={}, ctrl={}, alt={}, result={}",
+            "OnTestKeyDown: vk=0x{:02X}, result={}",
             vk,
-            ime_on,
-            modifiers.shift,
-            modifiers.ctrl,
-            modifiers.alt,
             if result.is_some() { "EAT" } else { "PASS" }
         ));
 
