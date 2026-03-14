@@ -15,11 +15,17 @@ pub const VK_CONTROL: u16 = 0x11;
 pub const VK_MENU: u16 = 0x12; // Alt
 pub const VK_ESCAPE: u16 = 0x1B;
 pub const VK_SPACE: u16 = 0x20;
+pub const VK_LEFT: u16 = 0x25;
 pub const VK_UP: u16 = 0x26;
+pub const VK_RIGHT: u16 = 0x27;
 pub const VK_DOWN: u16 = 0x28;
+pub const VK_DELETE: u16 = 0x2E;
 pub const VK_0: u16 = 0x30;
 pub const VK_9: u16 = 0x39;
 pub const VK_A: u16 = 0x41;
+pub const VK_B: u16 = 0x42;
+pub const VK_D: u16 = 0x44;
+pub const VK_F: u16 = 0x46;
 pub const VK_G: u16 = 0x47;
 pub const VK_H: u16 = 0x48;
 pub const VK_J: u16 = 0x4A;
@@ -101,6 +107,9 @@ pub enum KeybindPreset {
 /// 各フィールドが None の場合、そのキーは OS に処理を委ねる。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CtrlKeyConfig {
+    pub ctrl_b: Option<EngineCommand>,
+    pub ctrl_d: Option<EngineCommand>,
+    pub ctrl_f: Option<EngineCommand>,
     pub ctrl_g: Option<EngineCommand>,
     pub ctrl_h: Option<EngineCommand>,
     pub ctrl_j: Option<EngineCommand>,
@@ -114,6 +123,9 @@ impl CtrlKeyConfig {
     pub fn from_preset(preset: &KeybindPreset) -> Self {
         match preset {
             KeybindPreset::None => Self {
+                ctrl_b: None,
+                ctrl_d: None,
+                ctrl_f: None,
                 ctrl_g: None,
                 ctrl_h: None,
                 ctrl_j: None,
@@ -122,6 +134,9 @@ impl CtrlKeyConfig {
                 ctrl_p: None,
             },
             KeybindPreset::Minimal => Self {
+                ctrl_b: None,
+                ctrl_d: None,
+                ctrl_f: None,
                 ctrl_g: Some(EngineCommand::Cancel),
                 ctrl_h: None,
                 ctrl_j: Some(EngineCommand::Commit),
@@ -130,6 +145,9 @@ impl CtrlKeyConfig {
                 ctrl_p: None,
             },
             KeybindPreset::Emacs => Self {
+                ctrl_b: Some(EngineCommand::CursorLeft),
+                ctrl_d: Some(EngineCommand::Delete),
+                ctrl_f: Some(EngineCommand::CursorRight),
                 ctrl_g: Some(EngineCommand::Cancel),
                 ctrl_h: Some(EngineCommand::Backspace),
                 ctrl_j: Some(EngineCommand::Commit),
@@ -196,8 +214,11 @@ pub fn map_key(
         VK_RETURN => Some(EngineCommand::Commit),
         VK_ESCAPE => Some(EngineCommand::Cancel),
         VK_BACK => Some(EngineCommand::Backspace),
+        VK_LEFT => Some(EngineCommand::CursorLeft),
+        VK_RIGHT => Some(EngineCommand::CursorRight),
         VK_DOWN => Some(EngineCommand::NextCandidate),
         VK_UP => Some(EngineCommand::PrevCandidate),
+        VK_DELETE => Some(EngineCommand::Delete),
         VK_OEM_MINUS => Some(EngineCommand::InsertChar('-')),
         VK_OEM_PERIOD => Some(EngineCommand::InsertChar('.')),
         VK_OEM_COMMA => Some(EngineCommand::InsertChar(',')),
@@ -223,6 +244,9 @@ pub fn is_alt_tilde(vk: u16, modifiers: &Modifiers) -> bool {
 /// Ctrl+キーを設定に基づいて EngineCommand に変換する。
 fn map_ctrl_key(vk: u16, config: &CtrlKeyConfig) -> Option<EngineCommand> {
     match vk {
+        VK_B => config.ctrl_b.clone(),
+        VK_D => config.ctrl_d.clone(),
+        VK_F => config.ctrl_f.clone(),
         VK_G => config.ctrl_g.clone(),
         VK_H => config.ctrl_h.clone(),
         VK_J => config.ctrl_j.clone(),
@@ -619,6 +643,71 @@ mod tests {
         let config = CtrlKeyConfig::default();
         let cmd = map_key(VK_OEM_COMMA, &Modifiers::none(), true, &config);
         assert_eq!(cmd, Some(EngineCommand::InsertChar(',')));
+    }
+
+    // === カーソル移動・Delete ===
+
+    #[test]
+    fn left_arrow_cursor_left() {
+        let config = CtrlKeyConfig::default();
+        let cmd = map_key(VK_LEFT, &Modifiers::none(), true, &config);
+        assert_eq!(cmd, Some(EngineCommand::CursorLeft));
+    }
+
+    #[test]
+    fn right_arrow_cursor_right() {
+        let config = CtrlKeyConfig::default();
+        let cmd = map_key(VK_RIGHT, &Modifiers::none(), true, &config);
+        assert_eq!(cmd, Some(EngineCommand::CursorRight));
+    }
+
+    #[test]
+    fn delete_key_delete() {
+        let config = CtrlKeyConfig::default();
+        let cmd = map_key(VK_DELETE, &Modifiers::none(), true, &config);
+        assert_eq!(cmd, Some(EngineCommand::Delete));
+    }
+
+    #[test]
+    fn emacs_ctrl_b_cursor_left() {
+        let config = CtrlKeyConfig::from_preset(&KeybindPreset::Emacs);
+        let cmd = map_key(VK_B, &Modifiers::ctrl(), true, &config);
+        assert_eq!(cmd, Some(EngineCommand::CursorLeft));
+    }
+
+    #[test]
+    fn emacs_ctrl_f_cursor_right() {
+        let config = CtrlKeyConfig::from_preset(&KeybindPreset::Emacs);
+        let cmd = map_key(VK_F, &Modifiers::ctrl(), true, &config);
+        assert_eq!(cmd, Some(EngineCommand::CursorRight));
+    }
+
+    #[test]
+    fn emacs_ctrl_d_delete() {
+        let config = CtrlKeyConfig::from_preset(&KeybindPreset::Emacs);
+        let cmd = map_key(VK_D, &Modifiers::ctrl(), true, &config);
+        assert_eq!(cmd, Some(EngineCommand::Delete));
+    }
+
+    #[test]
+    fn minimal_ctrl_b_returns_none() {
+        let config = CtrlKeyConfig::from_preset(&KeybindPreset::Minimal);
+        let cmd = map_key(VK_B, &Modifiers::ctrl(), true, &config);
+        assert_eq!(cmd, None);
+    }
+
+    #[test]
+    fn minimal_ctrl_f_returns_none() {
+        let config = CtrlKeyConfig::from_preset(&KeybindPreset::Minimal);
+        let cmd = map_key(VK_F, &Modifiers::ctrl(), true, &config);
+        assert_eq!(cmd, None);
+    }
+
+    #[test]
+    fn minimal_ctrl_d_returns_none() {
+        let config = CtrlKeyConfig::from_preset(&KeybindPreset::Minimal);
+        let cmd = map_key(VK_D, &Modifiers::ctrl(), true, &config);
+        assert_eq!(cmd, None);
     }
 
     // === IME トグルキー検出 ===
