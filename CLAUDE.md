@@ -75,6 +75,11 @@ cargo build --release
 .\installer\install.ps1 -Uninstall  # アンインストール
 ```
 
+## Windows IME 手動テスト
+
+- **テスト対象アプリ:** メモ帳（notepad.exe）を使用する。
+- **デバッグログ確認:** DebugView（Sysinternals）をフィルタなしで使用し、`[Enpitsu]` のログを確認する。
+
 ## Code Conventions
 
 - **Language:** Rust (Edition 2024)
