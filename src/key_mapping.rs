@@ -259,6 +259,36 @@ pub fn should_consume_key(state: EngineState, command: &Option<EngineCommand>) -
     }
 }
 
+/// 消費しない（アプリに渡す）キーを渡す前に、未確定入力を確定すべきか判定する。
+///
+/// `should_consume_key` が `false`（アプリに委ねる）を返すキーのうち、
+/// Composition がアクティブな状態でカーソル移動・削除・候補ナビをアプリに渡すと、
+/// IME が保持する Composition とアプリ側のキャレット位置がずれる。その状態で
+/// 次の消費キーが来ると、古い候補が誤った位置に確定されてしまう。
+///
+/// これを防ぐため、以下のキーはアプリに渡す前に現在の入力を確定する:
+/// - Composing で上下矢印（`NextCandidate`/`PrevCandidate`）
+/// - Converting でカーソル移動（`CursorLeft`/`CursorRight`）・`Delete`
+///
+/// Direct 状態は Composition が無いため確定不要。マップされないキー
+/// （修飾キー単体・ファンクションキー等）も確定しない。
+pub fn should_commit_before_passthrough(
+    state: EngineState,
+    command: &Option<EngineCommand>,
+) -> bool {
+    let Some(command) = command else {
+        return false;
+    };
+    matches!(
+        (state, command),
+        (EngineState::Composing, EngineCommand::NextCandidate)
+            | (EngineState::Composing, EngineCommand::PrevCandidate)
+            | (EngineState::Converting, EngineCommand::CursorLeft)
+            | (EngineState::Converting, EngineCommand::CursorRight)
+            | (EngineState::Converting, EngineCommand::Delete)
+    )
+}
+
 /// Ctrl+Space のキー組み合わせかどうかを判定する。
 pub fn is_ctrl_space(vk: u16, modifiers: &Modifiers) -> bool {
     vk == VK_SPACE && modifiers.ctrl && !modifiers.shift && !modifiers.alt
@@ -984,5 +1014,121 @@ mod tests {
             Converting,
             &Some(EngineCommand::InsertChar('a'))
         ));
+    }
+
+    // === should_commit_before_passthrough: 渡す前に確定すべきか ===
+
+    #[test]
+    fn commit_before_passthrough_none_command_is_false() {
+        assert!(!should_commit_before_passthrough(Direct, &None));
+        assert!(!should_commit_before_passthrough(Composing, &None));
+        assert!(!should_commit_before_passthrough(Converting, &None));
+    }
+
+    // Converting でカーソル移動・Delete を渡す前は確定する (Bug 4 整合性)
+    #[test]
+    fn commit_before_passthrough_converting_cursor_left() {
+        assert!(should_commit_before_passthrough(
+            Converting,
+            &Some(EngineCommand::CursorLeft)
+        ));
+    }
+
+    #[test]
+    fn commit_before_passthrough_converting_cursor_right() {
+        assert!(should_commit_before_passthrough(
+            Converting,
+            &Some(EngineCommand::CursorRight)
+        ));
+    }
+
+    #[test]
+    fn commit_before_passthrough_converting_delete() {
+        assert!(should_commit_before_passthrough(
+            Converting,
+            &Some(EngineCommand::Delete)
+        ));
+    }
+
+    // Composing で上下矢印を渡す前は確定する (Bug 3 整合性)
+    #[test]
+    fn commit_before_passthrough_composing_next_candidate() {
+        assert!(should_commit_before_passthrough(
+            Composing,
+            &Some(EngineCommand::NextCandidate)
+        ));
+    }
+
+    #[test]
+    fn commit_before_passthrough_composing_prev_candidate() {
+        assert!(should_commit_before_passthrough(
+            Composing,
+            &Some(EngineCommand::PrevCandidate)
+        ));
+    }
+
+    // 消費するキーは確定対象外
+    #[test]
+    fn commit_before_passthrough_converting_next_candidate_is_false() {
+        assert!(!should_commit_before_passthrough(
+            Converting,
+            &Some(EngineCommand::NextCandidate)
+        ));
+    }
+
+    #[test]
+    fn commit_before_passthrough_composing_cursor_left_is_false() {
+        assert!(!should_commit_before_passthrough(
+            Composing,
+            &Some(EngineCommand::CursorLeft)
+        ));
+    }
+
+    // Direct は Composition が無いため確定不要
+    #[test]
+    fn commit_before_passthrough_direct_cursor_left_is_false() {
+        assert!(!should_commit_before_passthrough(
+            Direct,
+            &Some(EngineCommand::CursorLeft)
+        ));
+    }
+
+    #[test]
+    fn commit_before_passthrough_direct_insert_char_is_false() {
+        assert!(!should_commit_before_passthrough(
+            Direct,
+            &Some(EngineCommand::InsertChar('a'))
+        ));
+    }
+
+    // 不変条件: 確定対象なら必ず非消費キーである
+    #[test]
+    fn commit_before_passthrough_implies_not_consumed() {
+        let states = [Direct, Composing, Converting];
+        let commands = [
+            EngineCommand::InsertChar('a'),
+            EngineCommand::Convert,
+            EngineCommand::NextCandidate,
+            EngineCommand::PrevCandidate,
+            EngineCommand::Commit,
+            EngineCommand::Cancel,
+            EngineCommand::Backspace,
+            EngineCommand::CursorLeft,
+            EngineCommand::CursorRight,
+            EngineCommand::Delete,
+        ];
+        for state in states {
+            for command in &commands {
+                let cmd = Some(command.clone());
+                if should_commit_before_passthrough(state, &cmd) {
+                    assert!(
+                        !should_consume_key(state, &cmd),
+                        "確定対象 {:?}/{:?} は非消費キーであるべき",
+                        state,
+                        command
+                    );
+                }
+            }
+        }
     }
 }

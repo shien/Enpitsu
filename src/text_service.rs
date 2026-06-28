@@ -163,14 +163,20 @@ impl EditSession {
             cloned.Collapse(ec, TF_ANCHOR_END)?;
 
             // 4. SetSelection でキャレット位置を反映
-            let selection = TF_SELECTION {
+            let mut selection = TF_SELECTION {
                 range: core::mem::ManuallyDrop::new(Some(cloned)),
                 style: TF_SELECTIONSTYLE {
                     ase: TF_AE_END,
                     fInterimChar: FALSE,
                 },
             };
-            self.context.SetSelection(ec, &[selection])
+            let set_result = self
+                .context
+                .SetSelection(ec, core::slice::from_ref(&selection));
+            // TF_SELECTION は入力専用構造体で range (ManuallyDrop) を自動解放しない。
+            // SetSelection 後に明示的に解放して COM 参照リークを防ぐ。
+            core::mem::ManuallyDrop::drop(&mut selection.range);
+            set_result
         };
         if let Err(ref e) = result {
             debug_log(&format!("set_cursor_position FAILED: {:?}", e));
@@ -545,11 +551,33 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
         let mut engine = self.engine.lock().unwrap();
         let state = engine.state();
         if !key_mapping::should_consume_key(state, &command) {
-            drop(engine);
-            debug_log(&format!(
-                "OnKeyDown: vk=0x{:02X} not consumed in {:?}, passing",
-                vk, state
-            ));
+            // Composition がアクティブな状態でカーソル移動・削除・候補ナビを
+            // そのまま渡すと、IME の Composition とアプリのキャレットがずれ、
+            // 次の消費キーで古い候補が誤った位置に確定される。該当キーは
+            // 渡す前に未確定入力を確定してから FALSE を返す。
+            if key_mapping::should_commit_before_passthrough(state, &command) {
+                let output = engine.process(EngineCommand::Commit);
+                drop(engine);
+                if let Some(context) = pic {
+                    if let Err(e) = self.update_composition(context, &output) {
+                        debug_log(&format!(
+                            "OnKeyDown: commit-before-passthrough FAILED: {:?}",
+                            e
+                        ));
+                        return Err(e);
+                    }
+                }
+                debug_log(&format!(
+                    "OnKeyDown: vk=0x{:02X} committed before passing in {:?}",
+                    vk, state
+                ));
+            } else {
+                drop(engine);
+                debug_log(&format!(
+                    "OnKeyDown: vk=0x{:02X} not consumed in {:?}, passing",
+                    vk, state
+                ));
+            }
             return Ok(FALSE);
         }
         // should_consume_key が true を返すのは command が Some のときのみ。
