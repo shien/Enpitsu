@@ -54,13 +54,17 @@ impl ITfCompositionSink_Impl for CompositionSink_Impl {
 
 /// EditSession 内で実行するアクション。
 enum EditAction {
-    /// Composition を開始/更新してテキストを設定する。
-    SetText(String),
+    /// Composition を開始/更新してテキストを設定し、カーソル位置を反映する。
+    SetText { text: String, cursor_pos: usize },
     /// テキストを確定して Composition を終了する。
     CommitText(String),
     /// テキストを確定して Composition を終了し、直後に新しい Composition を開始する。
     /// Converting 中の InsertChar で候補確定と新規入力を同一セッションで処理する。
-    CommitAndCompose { committed: String, display: String },
+    CommitAndCompose {
+        committed: String,
+        display: String,
+        cursor_pos: usize,
+    },
     /// Composition を終了する。
     EndComposition,
 }
@@ -125,6 +129,55 @@ impl EditSession {
         Ok(())
     }
 
+    /// Composition 範囲内のキャレット位置を `cursor_pos`（先頭からの文字数）に設定する。
+    ///
+    /// `SetText` 後はキャレットが範囲末尾に置かれるため、左右矢印キーで移動した
+    /// 内部カーソル位置を TSF に反映する。SetSelection 失敗時はログのみ出力して続行し、
+    /// テキスト設定自体は無効化しない (Bug 2)。
+    fn set_cursor_position(&self, ec: u32, cursor_pos: usize) -> Result<()> {
+        let comp = self.composition.lock().unwrap();
+        let Some(ref composition) = *comp else {
+            return Ok(());
+        };
+        debug_log(&format!("set_cursor_position: pos={}", cursor_pos));
+        let result: Result<()> = unsafe {
+            let range = composition.GetRange()?;
+            let cloned = range.Clone()?;
+
+            // 1. Range を先頭に collapse（0 幅にする）
+            cloned.Collapse(ec, TF_ANCHOR_START)?;
+
+            // 2. 終了アンカーを cursor_pos 文字分移動
+            let mut shifted: i32 = 0;
+            let halt_cond = TF_HALTCOND::default();
+            cloned.ShiftEnd(ec, cursor_pos as i32, &mut shifted, &halt_cond)?;
+            if shifted != cursor_pos as i32 {
+                debug_log(&format!(
+                    "set_cursor_position: shifted={} != cursor_pos={} (末尾到達)",
+                    shifted, cursor_pos
+                ));
+            }
+
+            // 3. 終了位置で再度 collapse → 0 幅のキャレットにする。
+            //    省略すると Range に幅が残り選択状態になる。
+            cloned.Collapse(ec, TF_ANCHOR_END)?;
+
+            // 4. SetSelection でキャレット位置を反映
+            let selection = TF_SELECTION {
+                range: core::mem::ManuallyDrop::new(Some(cloned)),
+                style: TF_SELECTIONSTYLE {
+                    ase: TF_AE_END,
+                    fInterimChar: FALSE,
+                },
+            };
+            self.context.SetSelection(ec, &[selection])
+        };
+        if let Err(ref e) = result {
+            debug_log(&format!("set_cursor_position FAILED: {:?}", e));
+        }
+        Ok(())
+    }
+
     /// Composition を終了し、参照をクリアする。
     fn finish_composition(&self, ec: u32) -> Result<()> {
         let mut comp = self.composition.lock().unwrap();
@@ -141,10 +194,14 @@ impl ITfEditSession_Impl for EditSession_Impl {
     fn DoEditSession(&self, ec: u32) -> Result<()> {
         debug_log(&format!("DoEditSession called, ec={}", ec));
         let result = match &self.action {
-            EditAction::SetText(text) => {
-                debug_log(&format!("DoEditSession: SetText('{}')", text));
+            EditAction::SetText { text, cursor_pos } => {
+                debug_log(&format!(
+                    "DoEditSession: SetText('{}', cursor_pos={})",
+                    text, cursor_pos
+                ));
                 self.ensure_composition(ec)
                     .and_then(|()| self.write_text(ec, text))
+                    .and_then(|()| self.set_cursor_position(ec, *cursor_pos))
             }
             EditAction::CommitText(text) => {
                 debug_log(&format!("DoEditSession: CommitText('{}')", text));
@@ -152,16 +209,21 @@ impl ITfEditSession_Impl for EditSession_Impl {
                     .and_then(|()| self.write_text(ec, text))
                     .and_then(|()| self.finish_composition(ec))
             }
-            EditAction::CommitAndCompose { committed, display } => {
+            EditAction::CommitAndCompose {
+                committed,
+                display,
+                cursor_pos,
+            } => {
                 debug_log(&format!(
-                    "DoEditSession: CommitAndCompose('{}', '{}')",
-                    committed, display
+                    "DoEditSession: CommitAndCompose('{}', '{}', cursor_pos={})",
+                    committed, display, cursor_pos
                 ));
                 self.ensure_composition(ec)
                     .and_then(|()| self.write_text(ec, committed))
                     .and_then(|()| self.finish_composition(ec))
                     .and_then(|()| self.ensure_composition(ec))
                     .and_then(|()| self.write_text(ec, display))
+                    .and_then(|()| self.set_cursor_position(ec, *cursor_pos))
             }
             EditAction::EndComposition => {
                 debug_log("DoEditSession: EndComposition");
@@ -281,11 +343,15 @@ impl TextService {
             EditAction::CommitAndCompose {
                 committed: output.committed.clone(),
                 display: output.display.clone(),
+                cursor_pos: output.cursor_pos,
             }
         } else if !output.committed.is_empty() {
             EditAction::CommitText(output.committed.clone())
         } else if !output.display.is_empty() {
-            EditAction::SetText(output.display.clone())
+            EditAction::SetText {
+                text: output.display.clone(),
+                cursor_pos: output.cursor_pos,
+            }
         } else {
             // 表示も確定テキストもない場合、Composition がなければ何もしない
             if self.composition.lock().unwrap().is_none() {
@@ -422,7 +488,12 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
         let result = if is_toggle {
             true
         } else {
-            key_mapping::map_key(vk, &modifiers, ime_on, &self.ctrl_config).is_some()
+            // エンジンの状態を考慮し、その状態で意味のあるキーのみ消費する。
+            // Direct で矢印・Enter 等を消費しない (Bug 1)、Composing で上下矢印を
+            // 消費しない (Bug 3)、Converting でカーソル移動・Delete を消費しない (Bug 4)。
+            let command = key_mapping::map_key(vk, &modifiers, ime_on, &self.ctrl_config);
+            let state = self.engine.lock().unwrap().state();
+            key_mapping::should_consume_key(state, &command)
         };
 
         debug_log(&format!(
@@ -454,7 +525,10 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
                 drop(engine);
                 if let Some(context) = pic {
                     if let Err(e) = self.update_composition(context, &output) {
-                        debug_log(&format!("OnKeyDown: toggle off update_composition FAILED: {:?}", e));
+                        debug_log(&format!(
+                            "OnKeyDown: toggle off update_composition FAILED: {:?}",
+                            e
+                        ));
                         return Err(e);
                     }
                 }
@@ -464,17 +538,28 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
 
         let ime_on = *self.ime_on.lock().unwrap();
 
-        let Some(command) = key_mapping::map_key(vk, &modifiers, ime_on, &self.ctrl_config) else {
-            debug_log(&format!("OnKeyDown: vk=0x{:02X} not mapped, passing", vk));
+        let command = key_mapping::map_key(vk, &modifiers, ime_on, &self.ctrl_config);
+
+        // エンジンの状態でこのキーを消費すべきか判定する。
+        // 消費しない場合はアプリに渡す（OnTestKeyDown の判定と一致させる）。
+        let mut engine = self.engine.lock().unwrap();
+        let state = engine.state();
+        if !key_mapping::should_consume_key(state, &command) {
+            drop(engine);
+            debug_log(&format!(
+                "OnKeyDown: vk=0x{:02X} not consumed in {:?}, passing",
+                vk, state
+            ));
             return Ok(FALSE);
-        };
+        }
+        // should_consume_key が true を返すのは command が Some のときのみ。
+        let command = command.expect("should_consume_key guarantees Some");
 
         debug_log(&format!(
             "OnKeyDown: vk=0x{:02X}, command={:?}",
             vk, command
         ));
 
-        let mut engine = self.engine.lock().unwrap();
         let output = engine.process(command);
         drop(engine);
 

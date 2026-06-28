@@ -4,7 +4,7 @@
 //! ConversionEngine に渡す EngineCommand に変換する。
 //! プラットフォーム非依存のため、どの OS でもテスト可能。
 
-use crate::engine::EngineCommand;
+use crate::engine::{EngineCommand, EngineState};
 
 // === 仮想キーコード定数 ===
 
@@ -223,6 +223,39 @@ pub fn map_key(
         VK_OEM_PERIOD => Some(EngineCommand::InsertChar('.')),
         VK_OEM_COMMA => Some(EngineCommand::InsertChar(',')),
         _ => None,
+    }
+}
+
+/// エンジンの状態とマップ済みコマンドから、そのキーを IME が消費すべきか判定する。
+///
+/// IME がキーを消費（`OnTestKeyDown`/`OnKeyDown` で `TRUE` を返す）すると、
+/// そのキーはアプリケーションに渡らない。各状態で「実行しても何も起きない」
+/// コマンドは消費せず、アプリケーションに委ねることでカーソル移動・改行・
+/// 空白入力などの通常操作を妨げないようにする。
+///
+/// - Direct: 文字入力 (`InsertChar`) のみ消費する。矢印・Backspace・Enter・
+///   Space・Escape・Delete はアプリに渡す (Bug 1)。
+/// - Composing: 候補ナビゲーション (`NextCandidate`/`PrevCandidate`) は候補が
+///   存在しないため消費しない。上下矢印はアプリに渡す (Bug 3)。
+/// - Converting: カーソル移動 (`CursorLeft`/`CursorRight`) と `Delete` は
+///   消費しない。アプリに渡す (Bug 4)。
+pub fn should_consume_key(state: EngineState, command: &Option<EngineCommand>) -> bool {
+    let Some(command) = command else {
+        return false;
+    };
+    match (state, command) {
+        // Direct: 文字入力のみ消費し、それ以外はアプリに委ねる
+        (EngineState::Direct, EngineCommand::InsertChar(_)) => true,
+        (EngineState::Direct, _) => false,
+        // Composing: 候補ナビは消費しない（候補が無いため無意味）
+        (EngineState::Composing, EngineCommand::NextCandidate) => false,
+        (EngineState::Composing, EngineCommand::PrevCandidate) => false,
+        (EngineState::Composing, _) => true,
+        // Converting: カーソル移動・Delete は消費しない
+        (EngineState::Converting, EngineCommand::CursorLeft) => false,
+        (EngineState::Converting, EngineCommand::CursorRight) => false,
+        (EngineState::Converting, EngineCommand::Delete) => false,
+        (EngineState::Converting, _) => true,
     }
 }
 
@@ -755,5 +788,201 @@ mod tests {
     #[test]
     fn tilde_without_alt_is_not_toggle() {
         assert!(!is_alt_tilde(VK_OEM_3, &Modifiers::none()));
+    }
+
+    // === should_consume_key: 状態に応じたキー消費判定 ===
+
+    use EngineState::*;
+
+    // --- None コマンド ---
+
+    #[test]
+    fn consume_none_command_is_false() {
+        assert!(!should_consume_key(Direct, &None));
+        assert!(!should_consume_key(Composing, &None));
+        assert!(!should_consume_key(Converting, &None));
+    }
+
+    // --- Direct: 文字入力のみ消費 (Bug 1) ---
+
+    #[test]
+    fn consume_direct_insert_char_is_true() {
+        assert!(should_consume_key(
+            Direct,
+            &Some(EngineCommand::InsertChar('a'))
+        ));
+    }
+
+    #[test]
+    fn consume_direct_cursor_left_is_false() {
+        assert!(!should_consume_key(
+            Direct,
+            &Some(EngineCommand::CursorLeft)
+        ));
+    }
+
+    #[test]
+    fn consume_direct_cursor_right_is_false() {
+        assert!(!should_consume_key(
+            Direct,
+            &Some(EngineCommand::CursorRight)
+        ));
+    }
+
+    #[test]
+    fn consume_direct_backspace_is_false() {
+        assert!(!should_consume_key(Direct, &Some(EngineCommand::Backspace)));
+    }
+
+    #[test]
+    fn consume_direct_commit_is_false() {
+        assert!(!should_consume_key(Direct, &Some(EngineCommand::Commit)));
+    }
+
+    #[test]
+    fn consume_direct_convert_is_false() {
+        // Space は Convert にマップされるが Direct では消費しない（空白入力をアプリに委ねる）
+        assert!(!should_consume_key(Direct, &Some(EngineCommand::Convert)));
+    }
+
+    #[test]
+    fn consume_direct_cancel_is_false() {
+        assert!(!should_consume_key(Direct, &Some(EngineCommand::Cancel)));
+    }
+
+    #[test]
+    fn consume_direct_delete_is_false() {
+        assert!(!should_consume_key(Direct, &Some(EngineCommand::Delete)));
+    }
+
+    #[test]
+    fn consume_direct_next_candidate_is_false() {
+        assert!(!should_consume_key(
+            Direct,
+            &Some(EngineCommand::NextCandidate)
+        ));
+    }
+
+    #[test]
+    fn consume_direct_prev_candidate_is_false() {
+        assert!(!should_consume_key(
+            Direct,
+            &Some(EngineCommand::PrevCandidate)
+        ));
+    }
+
+    // --- Composing: 上下矢印（候補ナビ）は消費しない (Bug 3) ---
+
+    #[test]
+    fn consume_composing_next_candidate_is_false() {
+        assert!(!should_consume_key(
+            Composing,
+            &Some(EngineCommand::NextCandidate)
+        ));
+    }
+
+    #[test]
+    fn consume_composing_prev_candidate_is_false() {
+        assert!(!should_consume_key(
+            Composing,
+            &Some(EngineCommand::PrevCandidate)
+        ));
+    }
+
+    #[test]
+    fn consume_composing_cursor_left_is_true() {
+        assert!(should_consume_key(
+            Composing,
+            &Some(EngineCommand::CursorLeft)
+        ));
+    }
+
+    #[test]
+    fn consume_composing_insert_char_is_true() {
+        assert!(should_consume_key(
+            Composing,
+            &Some(EngineCommand::InsertChar('a'))
+        ));
+    }
+
+    #[test]
+    fn consume_composing_backspace_is_true() {
+        assert!(should_consume_key(
+            Composing,
+            &Some(EngineCommand::Backspace)
+        ));
+    }
+
+    #[test]
+    fn consume_composing_convert_is_true() {
+        assert!(should_consume_key(Composing, &Some(EngineCommand::Convert)));
+    }
+
+    // --- Converting: カーソル移動・Delete は消費しない (Bug 4) ---
+
+    #[test]
+    fn consume_converting_cursor_left_is_false() {
+        assert!(!should_consume_key(
+            Converting,
+            &Some(EngineCommand::CursorLeft)
+        ));
+    }
+
+    #[test]
+    fn consume_converting_cursor_right_is_false() {
+        assert!(!should_consume_key(
+            Converting,
+            &Some(EngineCommand::CursorRight)
+        ));
+    }
+
+    #[test]
+    fn consume_converting_delete_is_false() {
+        assert!(!should_consume_key(
+            Converting,
+            &Some(EngineCommand::Delete)
+        ));
+    }
+
+    #[test]
+    fn consume_converting_next_candidate_is_true() {
+        assert!(should_consume_key(
+            Converting,
+            &Some(EngineCommand::NextCandidate)
+        ));
+    }
+
+    #[test]
+    fn consume_converting_prev_candidate_is_true() {
+        assert!(should_consume_key(
+            Converting,
+            &Some(EngineCommand::PrevCandidate)
+        ));
+    }
+
+    #[test]
+    fn consume_converting_commit_is_true() {
+        assert!(should_consume_key(Converting, &Some(EngineCommand::Commit)));
+    }
+
+    #[test]
+    fn consume_converting_cancel_is_true() {
+        assert!(should_consume_key(Converting, &Some(EngineCommand::Cancel)));
+    }
+
+    #[test]
+    fn consume_converting_backspace_is_true() {
+        assert!(should_consume_key(
+            Converting,
+            &Some(EngineCommand::Backspace)
+        ));
+    }
+
+    #[test]
+    fn consume_converting_insert_char_is_true() {
+        assert!(should_consume_key(
+            Converting,
+            &Some(EngineCommand::InsertChar('a'))
+        ));
     }
 }
