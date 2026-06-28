@@ -36,6 +36,12 @@ pub enum EngineCommand {
     Cancel,
     /// 1文字削除
     Backspace,
+    /// カーソルを左に移動
+    CursorLeft,
+    /// カーソルを右に移動
+    CursorRight,
+    /// カーソル後ろの1文字を削除
+    Delete,
 }
 
 /// エンジンの処理結果。
@@ -47,6 +53,8 @@ pub struct EngineOutput {
     pub display: String,
     /// 候補リスト内の選択インデックス
     pub candidate_index: Option<usize>,
+    /// display 内のカーソル位置（文字数）
+    pub cursor_pos: usize,
 }
 
 /// 変換エンジン。
@@ -107,7 +115,13 @@ impl ConversionEngine {
 
     /// コマンドを処理し、結果を返す。
     pub fn process(&mut self, command: EngineCommand) -> EngineOutput {
-        match (&self.state, &command) {
+        #[cfg(debug_assertions)]
+        eprintln!(
+            "[Engine::process] state={:?} command={:?}",
+            self.state, command
+        );
+
+        let result = match (&self.state, &command) {
             // === Direct ===
             (EngineState::Direct, EngineCommand::InsertChar(ch)) => {
                 self.input.feed_char(*ch);
@@ -131,6 +145,7 @@ impl ConversionEngine {
                     committed,
                     display: String::new(),
                     candidate_index: None,
+                    cursor_pos: 0,
                 }
             }
             (EngineState::Composing, EngineCommand::Cancel) => {
@@ -140,6 +155,21 @@ impl ConversionEngine {
             }
             (EngineState::Composing, EngineCommand::Backspace) => {
                 self.input.backspace();
+                if self.input.is_empty() {
+                    self.state = EngineState::Direct;
+                }
+                self.composing_output()
+            }
+            (EngineState::Composing, EngineCommand::CursorLeft) => {
+                self.input.move_left();
+                self.composing_output()
+            }
+            (EngineState::Composing, EngineCommand::CursorRight) => {
+                self.input.move_right();
+                self.composing_output()
+            }
+            (EngineState::Composing, EngineCommand::Delete) => {
+                self.input.delete();
                 if self.input.is_empty() {
                     self.state = EngineState::Direct;
                 }
@@ -181,6 +211,7 @@ impl ConversionEngine {
                     committed,
                     display: String::new(),
                     candidate_index: None,
+                    cursor_pos: 0,
                 }
             }
             (EngineState::Converting, EngineCommand::Cancel) => {
@@ -211,6 +242,7 @@ impl ConversionEngine {
                     committed,
                     display: composing.display,
                     candidate_index: None,
+                    cursor_pos: composing.cursor_pos,
                 }
             }
             (EngineState::Converting, EngineCommand::Backspace) => {
@@ -219,7 +251,17 @@ impl ConversionEngine {
                 self.state = EngineState::Composing;
                 self.composing_output()
             }
-        }
+            // Converting 状態でのカーソル移動・Delete は無視
+            (EngineState::Converting, _) => self.converting_output(),
+        };
+
+        #[cfg(debug_assertions)]
+        eprintln!(
+            "[Engine::process] → state={:?} cursor_pos={} display='{}'",
+            self.state, result.cursor_pos, result.display
+        );
+
+        result
     }
 
     /// 変換を実行する。候補があれば Converting へ、なければひらがな確定。
@@ -240,10 +282,12 @@ impl ConversionEngine {
                 committed,
                 display: String::new(),
                 candidate_index: None,
+                cursor_pos: 0,
             }
         } else {
             let cl = CandidateList::new(merged);
             let display = cl.current().unwrap_or("").to_string();
+            let cursor_pos = display.chars().count();
             let idx = cl.index();
             self.candidates = Some(cl);
             self.state = EngineState::Converting;
@@ -251,6 +295,7 @@ impl ConversionEngine {
                 committed: String::new(),
                 display,
                 candidate_index: Some(idx),
+                cursor_pos,
             }
         }
     }
@@ -284,22 +329,29 @@ impl ConversionEngine {
 
     /// Composing 状態の EngineOutput を組み立てる。
     fn composing_output(&self) -> EngineOutput {
-        let display = format!("{}{}", self.input.output(), self.input.pending());
+        let display = self.input.display();
+        let cursor_pos = self.input.cursor_pos();
         EngineOutput {
             committed: String::new(),
             display,
             candidate_index: None,
+            cursor_pos,
         }
     }
 
     /// Converting 状態の EngineOutput を組み立てる。
     fn converting_output(&self) -> EngineOutput {
         match &self.candidates {
-            Some(cl) => EngineOutput {
-                committed: String::new(),
-                display: cl.current().unwrap_or("").to_string(),
-                candidate_index: Some(cl.index()),
-            },
+            Some(cl) => {
+                let display = cl.current().unwrap_or("").to_string();
+                let cursor_pos = display.chars().count();
+                EngineOutput {
+                    committed: String::new(),
+                    display,
+                    candidate_index: Some(cl.index()),
+                    cursor_pos,
+                }
+            }
             None => self.empty_output(),
         }
     }
@@ -310,6 +362,7 @@ impl ConversionEngine {
             committed: String::new(),
             display: String::new(),
             candidate_index: None,
+            cursor_pos: 0,
         }
     }
 }
@@ -856,5 +909,131 @@ mod tests {
         assert_eq!(output.display, "感じ");
         let candidates = engine.candidates().unwrap();
         assert_eq!(candidates, &["感じ"]);
+    }
+
+    // === カーソル移動 ===
+
+    #[test]
+    fn cursor_left_in_composing_moves_cursor() {
+        let mut engine = test_engine();
+        for ch in "kaki".chars() {
+            engine.process(EngineCommand::InsertChar(ch));
+        }
+        let output = engine.process(EngineCommand::CursorLeft);
+        assert_eq!(output.cursor_pos, 1); // "か|き"
+        assert_eq!(output.display, "かき");
+    }
+
+    #[test]
+    fn cursor_right_in_composing_moves_cursor() {
+        let mut engine = test_engine();
+        for ch in "kaki".chars() {
+            engine.process(EngineCommand::InsertChar(ch));
+        }
+        engine.process(EngineCommand::CursorLeft); // "か|き"
+        let output = engine.process(EngineCommand::CursorRight); // "かき|"
+        assert_eq!(output.cursor_pos, 2);
+    }
+
+    #[test]
+    fn cursor_left_in_direct_is_noop() {
+        let mut engine = test_engine();
+        let output = engine.process(EngineCommand::CursorLeft);
+        assert_eq!(engine.state(), EngineState::Direct);
+        assert_eq!(output.display, "");
+    }
+
+    #[test]
+    fn cursor_right_in_direct_is_noop() {
+        let mut engine = test_engine();
+        let output = engine.process(EngineCommand::CursorRight);
+        assert_eq!(engine.state(), EngineState::Direct);
+        assert_eq!(output.display, "");
+    }
+
+    #[test]
+    fn cursor_left_in_converting_is_noop() {
+        let mut engine = test_engine();
+        for ch in "kanji".chars() {
+            engine.process(EngineCommand::InsertChar(ch));
+        }
+        engine.process(EngineCommand::Convert);
+        let output = engine.process(EngineCommand::CursorLeft);
+        assert_eq!(engine.state(), EngineState::Converting);
+        assert!(output.candidate_index.is_some());
+    }
+
+    #[test]
+    fn insert_at_cursor_in_composing() {
+        let mut engine = test_engine();
+        for ch in "kaki".chars() {
+            engine.process(EngineCommand::InsertChar(ch));
+        }
+        engine.process(EngineCommand::CursorLeft); // "か|き"
+        let output = engine.process(EngineCommand::InsertChar('a')); // "かあ|き"
+        assert_eq!(output.display, "かあき");
+    }
+
+    #[test]
+    fn backspace_at_cursor_in_composing() {
+        let mut engine = test_engine();
+        for ch in "kaki".chars() {
+            engine.process(EngineCommand::InsertChar(ch));
+        }
+        engine.process(EngineCommand::CursorLeft); // "か|き"
+        let output = engine.process(EngineCommand::Backspace); // "|き"
+        assert_eq!(output.display, "き");
+    }
+
+    #[test]
+    fn delete_at_cursor_in_composing() {
+        let mut engine = test_engine();
+        for ch in "kaki".chars() {
+            engine.process(EngineCommand::InsertChar(ch));
+        }
+        engine.process(EngineCommand::CursorLeft); // "か|き"
+        let output = engine.process(EngineCommand::Delete); // "か|"
+        assert_eq!(output.display, "か");
+    }
+
+    #[test]
+    fn delete_in_direct_is_noop() {
+        let mut engine = test_engine();
+        let output = engine.process(EngineCommand::Delete);
+        assert_eq!(engine.state(), EngineState::Direct);
+        assert_eq!(output.display, "");
+    }
+
+    #[test]
+    fn delete_in_converting_is_noop() {
+        let mut engine = test_engine();
+        for ch in "kanji".chars() {
+            engine.process(EngineCommand::InsertChar(ch));
+        }
+        engine.process(EngineCommand::Convert);
+        let output = engine.process(EngineCommand::Delete);
+        assert_eq!(engine.state(), EngineState::Converting);
+        assert!(output.candidate_index.is_some());
+    }
+
+    #[test]
+    fn delete_empties_composing_returns_to_direct() {
+        let mut engine = test_engine();
+        for ch in "ka".chars() {
+            engine.process(EngineCommand::InsertChar(ch));
+        }
+        engine.process(EngineCommand::CursorLeft); // "|か"
+        engine.process(EngineCommand::Delete); // "|"
+        assert_eq!(engine.state(), EngineState::Direct);
+    }
+
+    #[test]
+    fn cursor_pos_in_output() {
+        let mut engine = test_engine();
+        for ch in "kaki".chars() {
+            engine.process(EngineCommand::InsertChar(ch));
+        }
+        let output = engine.process(EngineCommand::InsertChar('a')); // "かきあ|"
+        assert_eq!(output.cursor_pos, 3);
     }
 }

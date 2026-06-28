@@ -115,6 +115,9 @@ impl Config {
         for (key, value) in keybind_overrides {
             let cmd = parse_command(value)?;
             match key {
+                "ctrl_b" => config.keybind.ctrl_b = cmd,
+                "ctrl_d" => config.keybind.ctrl_d = cmd,
+                "ctrl_f" => config.keybind.ctrl_f = cmd,
                 "ctrl_g" => config.keybind.ctrl_g = cmd,
                 "ctrl_h" => config.keybind.ctrl_h = cmd,
                 "ctrl_j" => config.keybind.ctrl_j = cmd,
@@ -184,6 +187,9 @@ fn parse_command(value: &str) -> Result<Option<EngineCommand>, ConfigError> {
         "prev" => Ok(Some(EngineCommand::PrevCandidate)),
         "backspace" => Ok(Some(EngineCommand::Backspace)),
         "convert" => Ok(Some(EngineCommand::Convert)),
+        "cursor_left" => Ok(Some(EngineCommand::CursorLeft)),
+        "cursor_right" => Ok(Some(EngineCommand::CursorRight)),
+        "delete" => Ok(Some(EngineCommand::Delete)),
         "none" => Ok(None),
         _ => Err(ConfigError::Parse(format!("不正なコマンド名: {value}"))),
     }
@@ -417,5 +423,49 @@ ctrl_j = "commit"
         let config = Config::parse(toml).unwrap();
         assert_eq!(config.keybind.ctrl_j, Some(EngineCommand::Commit));
         assert_eq!(config.keybind.ctrl_g, None);
+    }
+
+    // === カーソル移動・Delete 設定 ===
+
+    #[test]
+    fn parse_ctrl_b_cursor_left() {
+        let toml = r#"
+[keybind]
+ctrl_b = "cursor_left"
+"#;
+        let config = Config::parse(toml).unwrap();
+        assert_eq!(config.keybind.ctrl_b, Some(EngineCommand::CursorLeft));
+    }
+
+    #[test]
+    fn parse_ctrl_f_cursor_right() {
+        let toml = r#"
+[keybind]
+ctrl_f = "cursor_right"
+"#;
+        let config = Config::parse(toml).unwrap();
+        assert_eq!(config.keybind.ctrl_f, Some(EngineCommand::CursorRight));
+    }
+
+    #[test]
+    fn parse_ctrl_d_delete() {
+        let toml = r#"
+[keybind]
+ctrl_d = "delete"
+"#;
+        let config = Config::parse(toml).unwrap();
+        assert_eq!(config.keybind.ctrl_d, Some(EngineCommand::Delete));
+    }
+
+    #[test]
+    fn emacs_preset_includes_ctrl_b_f_d() {
+        let toml = r#"
+[general]
+keybind_preset = "emacs"
+"#;
+        let config = Config::parse(toml).unwrap();
+        assert_eq!(config.keybind.ctrl_b, Some(EngineCommand::CursorLeft));
+        assert_eq!(config.keybind.ctrl_f, Some(EngineCommand::CursorRight));
+        assert_eq!(config.keybind.ctrl_d, Some(EngineCommand::Delete));
     }
 }

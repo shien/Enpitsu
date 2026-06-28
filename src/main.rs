@@ -75,8 +75,16 @@ fn main() {
         }
 
         // 各文字を InsertChar で処理
+        let mut last_output = None;
         for ch in line.chars() {
-            engine.process(EngineCommand::InsertChar(ch));
+            last_output = Some(engine.process(EngineCommand::InsertChar(ch)));
+        }
+        if let Some(ref out) = last_output {
+            let _ = writeln!(
+                stdout,
+                "  composing: '{}' (cursor_pos={})",
+                out.display, out.cursor_pos
+            );
         }
 
         // 辞書ありの場合: Convert → 候補があれば表示してから Commit
