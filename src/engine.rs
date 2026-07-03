@@ -6,6 +6,7 @@
 use crate::candidate::CandidateList;
 use crate::dictionary::Dictionary;
 use crate::input_state::InputState;
+use crate::katakana;
 use crate::user_dictionary::UserDictionary;
 
 /// エンジンの状態。
@@ -26,6 +27,8 @@ pub enum EngineCommand {
     InsertChar(char),
     /// 変換開始 (Space)
     Convert,
+    /// カタカナ変換 (F7)
+    ConvertKatakana,
     /// 次の候補
     NextCandidate,
     /// 前の候補
@@ -136,6 +139,11 @@ impl ConversionEngine {
                 self.composing_output()
             }
             (EngineState::Composing, EngineCommand::Convert) => self.do_convert(),
+            (EngineState::Composing, EngineCommand::ConvertKatakana) => {
+                self.input.flush();
+                let hiragana = self.input.output().to_string();
+                self.enter_katakana(&hiragana)
+            }
             (EngineState::Composing, EngineCommand::Commit) => {
                 self.input.flush();
                 let committed = self.input.output().to_string();
@@ -190,6 +198,16 @@ impl ConversionEngine {
                     cl.prev();
                 }
                 self.converting_output()
+            }
+            (EngineState::Converting, EngineCommand::ConvertKatakana) => {
+                // 変換中に F7 → 読みをカタカナに変換して単一候補にする。
+                // reading が空（既にカタカナ等）の場合は現状を維持する。
+                if self.reading.is_empty() {
+                    self.converting_output()
+                } else {
+                    let reading = self.reading.clone();
+                    self.enter_katakana(&reading)
+                }
             }
             (EngineState::Converting, EngineCommand::Commit) => {
                 let committed = self
@@ -297,6 +315,27 @@ impl ConversionEngine {
                 candidate_index: Some(idx),
                 cursor_pos,
             }
+        }
+    }
+
+    /// 読み（ひらがな）をカタカナに変換し、単一候補の Converting 状態にする。
+    ///
+    /// カタカナ変換は決定的な変換のため学習しない。`reading` を空にして
+    /// 確定時のユーザー辞書記録をスキップし、変換候補を汚さないようにする。
+    fn enter_katakana(&mut self, hiragana: &str) -> EngineOutput {
+        let katakana = katakana::to_katakana(hiragana);
+        self.reading = String::new();
+        let cl = CandidateList::new(vec![katakana]);
+        let display = cl.current().unwrap_or("").to_string();
+        let cursor_pos = display.chars().count();
+        let idx = cl.index();
+        self.candidates = Some(cl);
+        self.state = EngineState::Converting;
+        EngineOutput {
+            committed: String::new(),
+            display,
+            candidate_index: Some(idx),
+            cursor_pos,
         }
     }
 
@@ -909,6 +948,101 @@ mod tests {
         assert_eq!(output.display, "感じ");
         let candidates = engine.candidates().unwrap();
         assert_eq!(candidates, &["感じ"]);
+    }
+
+    // === カタカナ変換 (F7) ===
+
+    #[test]
+    fn katakana_convert_in_composing() {
+        let mut engine = test_engine();
+        for ch in "kanji".chars() {
+            engine.process(EngineCommand::InsertChar(ch));
+        }
+        let output = engine.process(EngineCommand::ConvertKatakana);
+        assert_eq!(engine.state(), EngineState::Converting);
+        assert_eq!(output.display, "カンジ");
+    }
+
+    #[test]
+    fn katakana_commit_confirms_katakana() {
+        let mut engine = test_engine();
+        for ch in "kanji".chars() {
+            engine.process(EngineCommand::InsertChar(ch));
+        }
+        engine.process(EngineCommand::ConvertKatakana);
+        let output = engine.process(EngineCommand::Commit);
+        assert_eq!(output.committed, "カンジ");
+        assert_eq!(engine.state(), EngineState::Direct);
+    }
+
+    #[test]
+    fn katakana_from_converting_state() {
+        // Space で漢字変換した後に F7 → カタカナに切り替わる
+        let mut engine = test_engine();
+        for ch in "kanji".chars() {
+            engine.process(EngineCommand::InsertChar(ch));
+        }
+        engine.process(EngineCommand::Convert); // Converting, display="漢字"
+        let output = engine.process(EngineCommand::ConvertKatakana);
+        assert_eq!(engine.state(), EngineState::Converting);
+        assert_eq!(output.display, "カンジ");
+    }
+
+    #[test]
+    fn katakana_convert_without_dict() {
+        // 辞書なしでもカタカナ変換は動く（辞書不要）
+        let mut engine = engine_without_dict();
+        for ch in "aiueo".chars() {
+            engine.process(EngineCommand::InsertChar(ch));
+        }
+        let output = engine.process(EngineCommand::ConvertKatakana);
+        assert_eq!(output.display, "アイウエオ");
+        let output = engine.process(EngineCommand::Commit);
+        assert_eq!(output.committed, "アイウエオ");
+    }
+
+    #[test]
+    fn katakana_commit_does_not_learn() {
+        // カタカナ確定はユーザー辞書を汚さない
+        // （確定後に再変換しても漢字が先頭のまま）
+        let dict = Dictionary::load_from_file(Path::new("tests/fixtures/test_dict.txt")).unwrap();
+        let user_dict = UserDictionary::new();
+        let mut engine = ConversionEngine::new_with_user_dict(Some(dict), Some(user_dict));
+
+        for ch in "kanji".chars() {
+            engine.process(EngineCommand::InsertChar(ch));
+        }
+        engine.process(EngineCommand::ConvertKatakana);
+        engine.process(EngineCommand::Commit); // カンジ を確定
+
+        // 再度 "kanji" を変換 → カタカナは学習されず漢字が先頭
+        for ch in "kanji".chars() {
+            engine.process(EngineCommand::InsertChar(ch));
+        }
+        let output = engine.process(EngineCommand::Convert);
+        assert_eq!(output.display, "漢字");
+    }
+
+    #[test]
+    fn katakana_insert_char_auto_commits() {
+        // カタカナ表示中に文字入力 → カタカナが確定し新規入力開始
+        let mut engine = test_engine();
+        for ch in "kanji".chars() {
+            engine.process(EngineCommand::InsertChar(ch));
+        }
+        engine.process(EngineCommand::ConvertKatakana);
+        let output = engine.process(EngineCommand::InsertChar('a'));
+        assert_eq!(output.committed, "カンジ");
+        assert_eq!(engine.state(), EngineState::Composing);
+        assert_eq!(output.display, "あ");
+    }
+
+    #[test]
+    fn katakana_in_direct_is_noop() {
+        let mut engine = test_engine();
+        let output = engine.process(EngineCommand::ConvertKatakana);
+        assert_eq!(engine.state(), EngineState::Direct);
+        assert_eq!(output.display, "");
     }
 
     // === カーソル移動 ===

@@ -34,6 +34,7 @@ pub const VK_N: u16 = 0x4E;
 pub const VK_P: u16 = 0x50;
 pub const VK_Z: u16 = 0x5A;
 pub const VK_F1: u16 = 0x70;
+pub const VK_F7: u16 = 0x76;
 pub const VK_OEM_COMMA: u16 = 0xBC;
 pub const VK_OEM_MINUS: u16 = 0xBD;
 pub const VK_OEM_PERIOD: u16 = 0xBE;
@@ -211,6 +212,7 @@ pub fn map_key(
             Some(EngineCommand::InsertChar(ch))
         }
         VK_SPACE => Some(EngineCommand::Convert),
+        VK_F7 => Some(EngineCommand::ConvertKatakana),
         VK_RETURN => Some(EngineCommand::Commit),
         VK_ESCAPE => Some(EngineCommand::Cancel),
         VK_BACK => Some(EngineCommand::Backspace),
@@ -493,6 +495,20 @@ mod tests {
         let config = CtrlKeyConfig::default();
         let cmd = map_key(VK_ESCAPE, &Modifiers::none(), true, &config);
         assert_eq!(cmd, Some(EngineCommand::Cancel));
+    }
+
+    #[test]
+    fn f7_key_converts_katakana() {
+        let config = CtrlKeyConfig::default();
+        let cmd = map_key(VK_F7, &Modifiers::none(), true, &config);
+        assert_eq!(cmd, Some(EngineCommand::ConvertKatakana));
+    }
+
+    #[test]
+    fn f7_key_ime_off_returns_none() {
+        let config = CtrlKeyConfig::default();
+        let cmd = map_key(VK_F7, &Modifiers::none(), false, &config);
+        assert_eq!(cmd, None);
     }
 
     #[test]
