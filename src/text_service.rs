@@ -13,7 +13,7 @@ use windows::core::*;
 
 use crate::config::{Config, ToggleKey};
 use crate::dictionary::Dictionary;
-use crate::engine::{ConversionEngine, EngineCommand, EngineOutput};
+use crate::engine::{ConversionEngine, EngineCommand, EngineOutput, EngineState};
 use crate::key_mapping::{self, CtrlKeyConfig, Modifiers};
 use crate::user_dictionary::UserDictionary;
 
@@ -486,8 +486,14 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
         let is_toggle = self.is_toggle_key(vk, &modifiers);
         let result = if is_toggle {
             true
+        } else if key_mapping::map_key(vk, &modifiers, ime_on, &self.ctrl_config).is_some() {
+            // Direct 状態（未入力）では文字入力キー以外を消費せず、アプリに委ねる。
+            // これがないと矢印・Backspace・Enter・Space 等が握り潰され、
+            // カーソル移動や改行ができなくなる。
+            let state = self.engine.lock().unwrap().state();
+            state != EngineState::Direct || key_mapping::is_character_key(vk, &modifiers)
         } else {
-            key_mapping::map_key(vk, &modifiers, ime_on, &self.ctrl_config).is_some()
+            false
         };
 
         debug_log(&format!(
@@ -540,6 +546,15 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
         ));
 
         let mut engine = self.engine.lock().unwrap();
+        // Direct 状態では文字入力キー以外は消費せずアプリに委ねる（OnTestKeyDown と整合）。
+        if engine.state() == EngineState::Direct && !key_mapping::is_character_key(vk, &modifiers) {
+            drop(engine);
+            debug_log(&format!(
+                "OnKeyDown: vk=0x{:02X} not consumed in Direct state, passing",
+                vk
+            ));
+            return Ok(FALSE);
+        }
         let output = engine.process(command);
         drop(engine);
 

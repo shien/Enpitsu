@@ -226,6 +226,23 @@ pub fn map_key(
     }
 }
 
+/// 文字入力（`InsertChar`）を生成するキーかどうかを判定する。
+///
+/// Direct 状態で消費すべきキーを判別するために使う。
+/// `map_key` の `InsertChar` を返す分岐と同じ条件で判定する。
+/// Ctrl / Alt 押下時は文字入力キーではない。
+pub fn is_character_key(vk: u16, modifiers: &Modifiers) -> bool {
+    if modifiers.ctrl || modifiers.alt {
+        return false;
+    }
+    match vk {
+        VK_A..=VK_Z => true,
+        VK_0..=VK_9 => !modifiers.shift,
+        VK_OEM_MINUS | VK_OEM_PERIOD | VK_OEM_COMMA => true,
+        _ => false,
+    }
+}
+
 /// Ctrl+Space のキー組み合わせかどうかを判定する。
 pub fn is_ctrl_space(vk: u16, modifiers: &Modifiers) -> bool {
     vk == VK_SPACE && modifiers.ctrl && !modifiers.shift && !modifiers.alt
@@ -708,6 +725,51 @@ mod tests {
         let config = CtrlKeyConfig::from_preset(&KeybindPreset::Minimal);
         let cmd = map_key(VK_D, &Modifiers::ctrl(), true, &config);
         assert_eq!(cmd, None);
+    }
+
+    // === is_character_key ===
+
+    #[test]
+    fn is_character_key_alphabet() {
+        assert!(is_character_key(VK_A, &Modifiers::none()));
+        assert!(is_character_key(VK_Z, &Modifiers::none()));
+        // Shift+アルファベットも文字入力キー（大文字）
+        assert!(is_character_key(VK_A, &Modifiers::shift()));
+    }
+
+    #[test]
+    fn is_character_key_digits() {
+        assert!(is_character_key(VK_0, &Modifiers::none()));
+        assert!(is_character_key(VK_9, &Modifiers::none()));
+        // Shift+数字は記号なので文字入力キーではない
+        assert!(!is_character_key(VK_0, &Modifiers::shift()));
+    }
+
+    #[test]
+    fn is_character_key_punctuation() {
+        assert!(is_character_key(VK_OEM_MINUS, &Modifiers::none()));
+        assert!(is_character_key(VK_OEM_PERIOD, &Modifiers::none()));
+        assert!(is_character_key(VK_OEM_COMMA, &Modifiers::none()));
+    }
+
+    #[test]
+    fn is_character_key_non_character_keys() {
+        assert!(!is_character_key(VK_SPACE, &Modifiers::none()));
+        assert!(!is_character_key(VK_RETURN, &Modifiers::none()));
+        assert!(!is_character_key(VK_BACK, &Modifiers::none()));
+        assert!(!is_character_key(VK_LEFT, &Modifiers::none()));
+        assert!(!is_character_key(VK_RIGHT, &Modifiers::none()));
+        assert!(!is_character_key(VK_UP, &Modifiers::none()));
+        assert!(!is_character_key(VK_DOWN, &Modifiers::none()));
+        assert!(!is_character_key(VK_ESCAPE, &Modifiers::none()));
+        assert!(!is_character_key(VK_DELETE, &Modifiers::none()));
+    }
+
+    #[test]
+    fn is_character_key_with_ctrl_or_alt() {
+        // Ctrl / Alt 押下時は文字入力キーではない
+        assert!(!is_character_key(VK_A, &Modifiers::ctrl()));
+        assert!(!is_character_key(VK_A, &Modifiers::alt()));
     }
 
     // === IME トグルキー検出 ===
