@@ -3,6 +3,7 @@
 //! `ITfTextInputProcessorEx` と `ITfKeyEventSink` を実装し、
 //! Windows の TSF フレームワークと ConversionEngine を接続する。
 
+use std::mem::ManuallyDrop;
 use std::sync::{Arc, Mutex};
 
 use windows::Win32::Foundation::*;
@@ -54,13 +55,17 @@ impl ITfCompositionSink_Impl for CompositionSink_Impl {
 
 /// EditSession 内で実行するアクション。
 enum EditAction {
-    /// Composition を開始/更新してテキストを設定する。
-    SetText(String),
+    /// Composition を開始/更新してテキストを設定し、カーソル位置を反映する。
+    SetText { text: String, cursor_pos: usize },
     /// テキストを確定して Composition を終了する。
     CommitText(String),
     /// テキストを確定して Composition を終了し、直後に新しい Composition を開始する。
     /// Converting 中の InsertChar で候補確定と新規入力を同一セッションで処理する。
-    CommitAndCompose { committed: String, display: String },
+    CommitAndCompose {
+        committed: String,
+        display: String,
+        cursor_pos: usize,
+    },
     /// Composition を終了する。
     EndComposition,
 }
@@ -135,16 +140,59 @@ impl EditSession {
         }
         Ok(())
     }
+
+    /// Composition 範囲内のキャレット位置を `cursor_pos`（先頭からの文字数）に設定する。
+    ///
+    /// `SetText` はテキストを置換するだけでキャレットを移動しないため、
+    /// `ITfContext::SetSelection` で明示的に 0 幅の選択（キャレット）を設定する。
+    fn set_cursor_position(&self, ec: u32, cursor_pos: usize) -> Result<()> {
+        let comp = self.composition.lock().unwrap();
+        if let Some(ref composition) = *comp {
+            unsafe {
+                let range = composition.GetRange()?;
+                let cloned = range.Clone()?;
+
+                // 範囲を先頭に collapse（0 幅にする）
+                cloned.Collapse(ec, TF_ANCHOR_START)?;
+
+                // 終了アンカーを cursor_pos 文字分だけ前方へ移動
+                let mut shifted: i32 = 0;
+                let halt_cond = TF_HALTCOND::default();
+                cloned.ShiftEnd(ec, cursor_pos as i32, &mut shifted, &halt_cond)?;
+                if shifted != cursor_pos as i32 {
+                    debug_log(&format!(
+                        "set_cursor_position: shifted={} != cursor_pos={}",
+                        shifted, cursor_pos
+                    ));
+                }
+
+                // 終了位置で再度 collapse → 0 幅のキャレットにする
+                cloned.Collapse(ec, TF_ANCHOR_END)?;
+
+                let selection = TF_SELECTION {
+                    range: ManuallyDrop::new(Some(cloned)),
+                    style: TF_SELECTIONSTYLE {
+                        ase: TF_AE_END,
+                        fInterimChar: FALSE,
+                    },
+                };
+                debug_log(&format!("set_cursor_position: pos={}", cursor_pos));
+                self.context.SetSelection(ec, &[selection])?;
+            }
+        }
+        Ok(())
+    }
 }
 
 impl ITfEditSession_Impl for EditSession_Impl {
     fn DoEditSession(&self, ec: u32) -> Result<()> {
         debug_log(&format!("DoEditSession called, ec={}", ec));
         let result = match &self.action {
-            EditAction::SetText(text) => {
+            EditAction::SetText { text, cursor_pos } => {
                 debug_log(&format!("DoEditSession: SetText('{}')", text));
                 self.ensure_composition(ec)
                     .and_then(|()| self.write_text(ec, text))
+                    .and_then(|()| self.set_cursor_position(ec, *cursor_pos))
             }
             EditAction::CommitText(text) => {
                 debug_log(&format!("DoEditSession: CommitText('{}')", text));
@@ -152,7 +200,11 @@ impl ITfEditSession_Impl for EditSession_Impl {
                     .and_then(|()| self.write_text(ec, text))
                     .and_then(|()| self.finish_composition(ec))
             }
-            EditAction::CommitAndCompose { committed, display } => {
+            EditAction::CommitAndCompose {
+                committed,
+                display,
+                cursor_pos,
+            } => {
                 debug_log(&format!(
                     "DoEditSession: CommitAndCompose('{}', '{}')",
                     committed, display
@@ -162,6 +214,7 @@ impl ITfEditSession_Impl for EditSession_Impl {
                     .and_then(|()| self.finish_composition(ec))
                     .and_then(|()| self.ensure_composition(ec))
                     .and_then(|()| self.write_text(ec, display))
+                    .and_then(|()| self.set_cursor_position(ec, *cursor_pos))
             }
             EditAction::EndComposition => {
                 debug_log("DoEditSession: EndComposition");
@@ -281,11 +334,15 @@ impl TextService {
             EditAction::CommitAndCompose {
                 committed: output.committed.clone(),
                 display: output.display.clone(),
+                cursor_pos: output.cursor_pos,
             }
         } else if !output.committed.is_empty() {
             EditAction::CommitText(output.committed.clone())
         } else if !output.display.is_empty() {
-            EditAction::SetText(output.display.clone())
+            EditAction::SetText {
+                text: output.display.clone(),
+                cursor_pos: output.cursor_pos,
+            }
         } else {
             // 表示も確定テキストもない場合、Composition がなければ何もしない
             if self.composition.lock().unwrap().is_none() {
