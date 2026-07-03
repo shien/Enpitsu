@@ -196,8 +196,12 @@ impl ITfEditSession_Impl for EditSession_Impl {
             }
             EditAction::CommitText(text) => {
                 debug_log(&format!("DoEditSession: CommitText('{}')", text));
+                // 確定文字列の末尾へキャレットを移動してから Composition を終了する。
+                // これを省くと確定語の先頭にキャレットが戻る。
+                let caret = text.chars().count();
                 self.ensure_composition(ec)
                     .and_then(|()| self.write_text(ec, text))
+                    .and_then(|()| self.set_cursor_position(ec, caret))
                     .and_then(|()| self.finish_composition(ec))
             }
             EditAction::CommitAndCompose {
@@ -209,8 +213,12 @@ impl ITfEditSession_Impl for EditSession_Impl {
                     "DoEditSession: CommitAndCompose('{}', '{}')",
                     committed, display
                 ));
+                // 確定部分の末尾へキャレットを移動してから終了し、
+                // 続く新規 Composition が確定語の後ろから始まるようにする。
+                let committed_caret = committed.chars().count();
                 self.ensure_composition(ec)
                     .and_then(|()| self.write_text(ec, committed))
+                    .and_then(|()| self.set_cursor_position(ec, committed_caret))
                     .and_then(|()| self.finish_composition(ec))
                     .and_then(|()| self.ensure_composition(ec))
                     .and_then(|()| self.write_text(ec, display))
