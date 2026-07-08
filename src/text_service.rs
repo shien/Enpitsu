@@ -170,7 +170,7 @@ impl EditSession {
                 // 終了位置で再度 collapse → 0 幅のキャレットにする
                 cloned.Collapse(ec, TF_ANCHOR_END)?;
 
-                let selection = TF_SELECTION {
+                let mut selection = TF_SELECTION {
                     range: ManuallyDrop::new(Some(cloned)),
                     style: TF_SELECTIONSTYLE {
                         ase: TF_AE_END,
@@ -178,7 +178,15 @@ impl EditSession {
                     },
                 };
                 debug_log(&format!("set_cursor_position: pos={}", cursor_pos));
-                self.context.SetSelection(ec, &[selection])?;
+                // SetSelection は範囲を内部で AddRef するため、渡した後はこちらの
+                // クローン参照を解放する必要がある。range は ManuallyDrop に move
+                // されており自動 Drop されないので、呼び出し後に明示的に drop して
+                // キー入力ごとの ITfRange リークを防ぐ。
+                let result = self
+                    .context
+                    .SetSelection(ec, std::slice::from_ref(&selection));
+                ManuallyDrop::drop(&mut selection.range);
+                result?;
             }
         }
         Ok(())
