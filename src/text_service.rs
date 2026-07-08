@@ -339,9 +339,37 @@ impl TextService {
             .map(|p| p.to_path_buf())
     }
 
+    /// 指定されたキーが設定中のトグルキーかどうかを判定する。
+    fn is_toggle_key(&self, vk: u16, modifiers: &Modifiers) -> bool {
+        match &self.toggle_key {
+            ToggleKey::CtrlSpace => key_mapping::is_ctrl_space(vk, modifiers),
+            ToggleKey::ZenkakuHankaku => key_mapping::is_zenkaku_hankaku(vk, modifiers),
+            ToggleKey::AltTilde => key_mapping::is_alt_tilde(vk, modifiers),
+        }
+    }
+
+    /// 指定されたキーが予約キーとして登録済みか（＝OnPreservedKey が処理するか）を判定する。
+    ///
+    /// PreserveKey の登録に成功したキーは OnPreservedKey で処理されるため、OnKeyDown で
+    /// 重ねて処理すると二重トグルになる。逆に登録に失敗したキーは OnPreservedKey に届かない
+    /// ため、OnKeyDown 側でフォールバック処理する必要がある。その区別に使う。
+    fn is_preserved(&self, vk: u16, modifiers: &Modifiers) -> bool {
+        let tf_mods = tf_modifiers(modifiers);
+        self.preserved
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|(_, key)| key.uVKey == vk as u32 && key.uModifiers == tf_mods)
+    }
+
+    /// トグルキーのうち、予約キー登録に失敗して OnKeyDown で処理すべきものかを判定する。
+    fn is_toggle_fallback(&self, vk: u16, modifiers: &Modifiers) -> bool {
+        self.is_toggle_key(vk, modifiers) && !self.is_preserved(vk, modifiers)
+    }
+
     /// IME のオン/オフを切り替える。オフにする際は未確定入力をキャンセルする。
     ///
-    /// 予約キー（OnPreservedKey）と通常キー（OnKeyDown）の両経路から呼ばれる。
+    /// 予約キー（OnPreservedKey）と通常キー（OnKeyDown フォールバック）の両経路から呼ばれる。
     fn handle_toggle(&self, pic: Option<&ITfContext>) -> Result<()> {
         let mut ime_on = self.ime_on.lock().unwrap();
         *ime_on = !*ime_on;
@@ -552,8 +580,12 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
         let modifiers = modifiers_from_keyboard_state();
         let vk = wparam.0 as u16;
 
-        // トグルキーは予約キーとして OnPreservedKey で処理されるため、ここでは扱わない。
-        let result = if key_mapping::map_key(vk, &modifiers, ime_on, &self.ctrl_config).is_some() {
+        // トグルキーは通常は予約キーとして OnPreservedKey で処理されるため扱わない。
+        // ただし PreserveKey 登録に失敗したキーは OnKeyDown で処理するため、ここでも消費する。
+        let is_toggle_fallback = self.is_toggle_fallback(vk, &modifiers);
+        let result = if is_toggle_fallback {
+            true
+        } else if key_mapping::map_key(vk, &modifiers, ime_on, &self.ctrl_config).is_some() {
             // Direct 状態（未入力）では文字入力キー以外を消費せず、アプリに委ねる。
             // これがないと矢印・Backspace・Enter・Space 等が握り潰され、
             // カーソル移動や改行ができなくなる。
@@ -564,8 +596,8 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
         };
 
         debug_log(&format!(
-            "TEST vk=0x{:02X} ctrl={} ime={} eat={}",
-            vk, modifiers.ctrl, ime_on, result
+            "TEST vk=0x{:02X} ctrl={} ime={} toggle_fb={} eat={}",
+            vk, modifiers.ctrl, ime_on, is_toggle_fallback, result
         ));
 
         Ok(if result { TRUE } else { FALSE })
@@ -575,9 +607,15 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
         let modifiers = modifiers_from_keyboard_state();
         let vk = wparam.0 as u16;
 
-        // トグルキー（半角/全角・Ctrl+Space 等）は予約キーとして登録され、
-        // OnPreservedKey に配送される。ここで二重に処理すると 2 回トグルして
-        // 元に戻ってしまうため、OnKeyDown ではトグル処理を行わない。
+        // トグルキー（半角/全角・Ctrl+Space 等）は通常 PreserveKey により予約され、
+        // OnPreservedKey に配送される。登録済みのキーをここで重ねて処理すると 2 回
+        // トグルして元に戻るため扱わない。ただし登録に失敗したキー（他 TIP が予約済み等）
+        // は OnPreservedKey に届かないため、フォールバックとしてここで処理する。
+        if self.is_toggle_fallback(vk, &modifiers) {
+            debug_log("OnKeyDown: toggle fallback (PreserveKey 未登録)");
+            self.handle_toggle(pic)?;
+            return Ok(TRUE);
+        }
 
         let ime_on = *self.ime_on.lock().unwrap();
 
@@ -679,4 +717,19 @@ fn modifiers_from_keyboard_state() -> Modifiers {
             alt: GetKeyState(key_mapping::VK_MENU as i32) < 0,
         }
     }
+}
+
+/// `Modifiers` を TSF 予約キーの修飾子ビット（TF_MOD_*）に変換する。
+fn tf_modifiers(m: &Modifiers) -> u32 {
+    let mut bits = 0;
+    if m.alt {
+        bits |= key_mapping::TF_MOD_ALT;
+    }
+    if m.ctrl {
+        bits |= key_mapping::TF_MOD_CONTROL;
+    }
+    if m.shift {
+        bits |= key_mapping::TF_MOD_SHIFT;
+    }
+    bits
 }
