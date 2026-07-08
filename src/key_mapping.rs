@@ -40,6 +40,24 @@ pub const VK_OEM_MINUS: u16 = 0xBD;
 pub const VK_OEM_PERIOD: u16 = 0xBE;
 pub const VK_KANJI: u16 = 0x19;
 pub const VK_OEM_3: u16 = 0xC0; // ` (backtick/tilde)
+pub const VK_OEM_AUTO: u16 = 0xF3; // 半角/全角 が送ることがある VK
+pub const VK_OEM_ENLW: u16 = 0xF4; // 半角/全角 が送ることがある VK
+
+// === TSF 予約キー（PreserveKey）の修飾子ビット ===
+// msctf.h の TF_MOD_* と同じ値。プラットフォーム非依存に扱うため定数で持つ。
+
+pub const TF_MOD_ALT: u32 = 0x0001;
+pub const TF_MOD_CONTROL: u32 = 0x0002;
+pub const TF_MOD_SHIFT: u32 = 0x0004;
+
+/// TSF 予約キー登録に使う仕様（プラットフォーム非依存）。
+///
+/// `modifiers` は msctf.h の TF_MOD_* と同じビット値を用いる。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PreservedKeySpec {
+    pub vk: u16,
+    pub modifiers: u32,
+}
 
 /// 修飾キーの状態。
 #[derive(Debug, Clone, PartialEq, Eq)]

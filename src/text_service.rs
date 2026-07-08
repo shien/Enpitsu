@@ -14,6 +14,7 @@ use windows::core::*;
 use crate::config::{Config, ToggleKey};
 use crate::dictionary::Dictionary;
 use crate::engine::{ConversionEngine, EngineCommand, EngineOutput, EngineState};
+use crate::guids;
 use crate::key_mapping::{self, CtrlKeyConfig, Modifiers};
 use crate::user_dictionary::UserDictionary;
 
@@ -249,6 +250,9 @@ pub struct TextService {
     composition: Arc<Mutex<Option<ITfComposition>>>,
     ctrl_config: CtrlKeyConfig,
     toggle_key: ToggleKey,
+    /// PreserveKey で登録済みの予約キー（GUID とキー仕様）。
+    /// OnPreservedKey での照合と Deactivate 時の解除に使う。
+    preserved: Mutex<Vec<(GUID, TF_PRESERVEDKEY)>>,
 }
 
 impl TextService {
@@ -293,6 +297,7 @@ impl TextService {
             composition: Arc::new(Mutex::new(None)),
             ctrl_config,
             toggle_key,
+            preserved: Mutex::new(Vec::new()),
         }
     }
 
@@ -333,6 +338,37 @@ impl TextService {
             ToggleKey::ZenkakuHankaku => key_mapping::is_zenkaku_hankaku(vk, modifiers),
             ToggleKey::AltTilde => key_mapping::is_alt_tilde(vk, modifiers),
         }
+    }
+
+    /// IME のオン/オフを切り替える。オフにする際は未確定入力をキャンセルする。
+    ///
+    /// 予約キー（OnPreservedKey）と通常キー（OnKeyDown）の両経路から呼ばれる。
+    fn handle_toggle(&self, pic: Option<&ITfContext>) -> Result<()> {
+        let mut ime_on = self.ime_on.lock().unwrap();
+        *ime_on = !*ime_on;
+        let now_on = *ime_on;
+        drop(ime_on);
+        debug_log(&format!(
+            "handle_toggle: IME toggled to {}",
+            if now_on { "ON" } else { "OFF" }
+        ));
+
+        if !now_on {
+            // IME をオフにする際、未確定入力をキャンセルする
+            let mut engine = self.engine.lock().unwrap();
+            let output = engine.process(EngineCommand::Cancel);
+            drop(engine);
+            if let Some(context) = pic {
+                if let Err(e) = self.update_composition(context, &output) {
+                    debug_log(&format!(
+                        "handle_toggle: update_composition FAILED: {:?}",
+                        e
+                    ));
+                    return Err(e);
+                }
+            }
+        }
+        Ok(())
     }
 
     /// EngineOutput に基づいて EditSession を発行し、Composition を更新する。
@@ -418,6 +454,36 @@ impl ITfTextInputProcessorEx_Impl for TextService_Impl {
 
         debug_log("ActivateEx: AdviseKeyEventSink succeeded");
 
+        // 入力モードトグルキー（半角/全角・Ctrl+Space 等）を予約キーとして登録する。
+        // これがないと 半角/全角 のようなモード制御キーは OnKeyDown に配送されず、
+        // トグルが機能しない。予約キーは OnPreservedKey に配送される。
+        let specs = self.toggle_key.preserved_keys();
+        let key_guids = guids::preservedkey_guids();
+        let desc: Vec<u16> = "Enpitsu IME Toggle".encode_utf16().collect();
+        let mut registered: Vec<(GUID, TF_PRESERVEDKEY)> = Vec::new();
+        for (spec, guid) in specs.iter().zip(key_guids.iter()) {
+            let key = TF_PRESERVEDKEY {
+                uVKey: spec.vk as u32,
+                uModifiers: spec.modifiers,
+            };
+            match unsafe { keystroke_mgr.PreserveKey(tid, guid, &key, &desc) } {
+                Ok(()) => {
+                    debug_log(&format!(
+                        "ActivateEx: PreserveKey vk=0x{:02X} mod=0x{:X} registered",
+                        spec.vk, spec.modifiers
+                    ));
+                    registered.push((*guid, key));
+                }
+                Err(e) => {
+                    debug_log(&format!(
+                        "ActivateEx: PreserveKey vk=0x{:02X} FAILED: {:?}",
+                        spec.vk, e
+                    ));
+                }
+            }
+        }
+        *self.preserved.lock().unwrap() = registered;
+
         *self.thread_mgr.lock().unwrap() = Some(thread_mgr);
         *self.client_id.lock().unwrap() = tid;
         *self.ime_on.lock().unwrap() = true;
@@ -442,6 +508,10 @@ impl ITfTextInputProcessor_Impl for TextService_Impl {
             if let Ok(keystroke_mgr) = thread_mgr.cast::<ITfKeystrokeMgr>() {
                 unsafe {
                     let _ = keystroke_mgr.UnadviseKeyEventSink(tid);
+                    // 登録済みの予約キーを解除する。
+                    for (guid, key) in self.preserved.lock().unwrap().drain(..) {
+                        let _ = keystroke_mgr.UnpreserveKey(&guid, &key);
+                    }
                 }
             }
         }
@@ -508,28 +578,11 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
         let modifiers = modifiers_from_keyboard_state();
         let vk = wparam.0 as u16;
 
-        // トグルキーの処理（IME のオン/オフに関わらず反応する）
+        // トグルキーの処理（IME のオン/オフに関わらず反応する）。
+        // 予約キーとして登録されているキー（半角/全角・Ctrl+Space 等）は通常
+        // OnPreservedKey に配送されるが、配送されなかった場合のフォールバック。
         if self.is_toggle_key(vk, &modifiers) {
-            let mut ime_on = self.ime_on.lock().unwrap();
-            *ime_on = !*ime_on;
-            let now_on = *ime_on;
-            drop(ime_on);
-            debug_log(&format!(
-                "OnKeyDown: IME toggled to {}",
-                if now_on { "ON" } else { "OFF" }
-            ));
-            if !now_on {
-                // IME をオフにする際、未確定入力をキャンセルする
-                let mut engine = self.engine.lock().unwrap();
-                let output = engine.process(EngineCommand::Cancel);
-                drop(engine);
-                if let Some(context) = pic {
-                    if let Err(e) = self.update_composition(context, &output) {
-                        debug_log(&format!("OnKeyDown: toggle off update_composition FAILED: {:?}", e));
-                        return Err(e);
-                    }
-                }
-            }
+            self.handle_toggle(pic)?;
             return Ok(TRUE);
         }
 
@@ -591,8 +644,28 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
         Ok(FALSE)
     }
 
-    fn OnPreservedKey(&self, _pic: Option<&ITfContext>, _rguid: *const GUID) -> Result<BOOL> {
-        Ok(FALSE)
+    // rguid は TSF 側が有効なポインタを渡す。トレイトのシグネチャは固定のため
+    // unsafe を付けられず、null チェックの上で参照する。
+    #[allow(clippy::not_unsafe_ptr_arg_deref)]
+    fn OnPreservedKey(&self, pic: Option<&ITfContext>, rguid: *const GUID) -> Result<BOOL> {
+        if rguid.is_null() {
+            return Ok(FALSE);
+        }
+        let guid = unsafe { *rguid };
+        let is_toggle = self
+            .preserved
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|(g, _)| *g == guid);
+        if is_toggle {
+            debug_log("OnPreservedKey: toggle key");
+            self.handle_toggle(pic)?;
+            Ok(TRUE)
+        } else {
+            debug_log("OnPreservedKey: unknown guid, passing");
+            Ok(FALSE)
+        }
     }
 }
 

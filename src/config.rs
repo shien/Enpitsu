@@ -6,7 +6,7 @@
 use std::path::Path;
 
 use crate::engine::EngineCommand;
-use crate::key_mapping::{CtrlKeyConfig, KeybindPreset};
+use crate::key_mapping::{self, CtrlKeyConfig, KeybindPreset, PreservedKeySpec};
 
 /// 設定エラー。
 #[derive(Debug)]
@@ -38,6 +38,39 @@ pub enum ToggleKey {
     ZenkakuHankaku,
     CtrlSpace,
     AltTilde,
+}
+
+impl ToggleKey {
+    /// このトグルキーに対応する TSF 予約キー（PreserveKey）仕様のリストを返す。
+    ///
+    /// 半角/全角 キーはハードウェア・環境により送出する VK が異なる（0x19 のほか
+    /// 0xF3 / 0xF4 で来ることがある）ため、複数の仕様を返して取りこぼしを防ぐ。
+    pub fn preserved_keys(&self) -> Vec<PreservedKeySpec> {
+        match self {
+            ToggleKey::ZenkakuHankaku => vec![
+                PreservedKeySpec {
+                    vk: key_mapping::VK_KANJI,
+                    modifiers: 0,
+                },
+                PreservedKeySpec {
+                    vk: key_mapping::VK_OEM_AUTO,
+                    modifiers: 0,
+                },
+                PreservedKeySpec {
+                    vk: key_mapping::VK_OEM_ENLW,
+                    modifiers: 0,
+                },
+            ],
+            ToggleKey::CtrlSpace => vec![PreservedKeySpec {
+                vk: key_mapping::VK_SPACE,
+                modifiers: key_mapping::TF_MOD_CONTROL,
+            }],
+            ToggleKey::AltTilde => vec![PreservedKeySpec {
+                vk: key_mapping::VK_OEM_3,
+                modifiers: key_mapping::TF_MOD_ALT,
+            }],
+        }
+    }
 }
 
 /// アプリケーション設定。
@@ -455,6 +488,44 @@ ctrl_d = "delete"
 "#;
         let config = Config::parse(toml).unwrap();
         assert_eq!(config.keybind.ctrl_d, Some(EngineCommand::Delete));
+    }
+
+    // === トグルキー → 予約キー仕様 ===
+
+    #[test]
+    fn preserved_keys_zenkaku_hankaku() {
+        let specs = ToggleKey::ZenkakuHankaku.preserved_keys();
+        // 半角/全角 は環境差を吸収するため複数 VK を登録する
+        assert_eq!(specs.len(), 3);
+        assert!(specs.iter().all(|s| s.modifiers == 0));
+        let vks: Vec<u16> = specs.iter().map(|s| s.vk).collect();
+        assert!(vks.contains(&key_mapping::VK_KANJI));
+        assert!(vks.contains(&key_mapping::VK_OEM_AUTO));
+        assert!(vks.contains(&key_mapping::VK_OEM_ENLW));
+    }
+
+    #[test]
+    fn preserved_keys_ctrl_space() {
+        let specs = ToggleKey::CtrlSpace.preserved_keys();
+        assert_eq!(
+            specs,
+            vec![PreservedKeySpec {
+                vk: key_mapping::VK_SPACE,
+                modifiers: key_mapping::TF_MOD_CONTROL,
+            }]
+        );
+    }
+
+    #[test]
+    fn preserved_keys_alt_tilde() {
+        let specs = ToggleKey::AltTilde.preserved_keys();
+        assert_eq!(
+            specs,
+            vec![PreservedKeySpec {
+                vk: key_mapping::VK_OEM_3,
+                modifiers: key_mapping::TF_MOD_ALT,
+            }]
+        );
     }
 
     #[test]
