@@ -331,15 +331,6 @@ impl TextService {
             .map(|p| p.to_path_buf())
     }
 
-    /// 指定されたキーがトグルキーかどうかを判定する。
-    fn is_toggle_key(&self, vk: u16, modifiers: &key_mapping::Modifiers) -> bool {
-        match &self.toggle_key {
-            ToggleKey::CtrlSpace => key_mapping::is_ctrl_space(vk, modifiers),
-            ToggleKey::ZenkakuHankaku => key_mapping::is_zenkaku_hankaku(vk, modifiers),
-            ToggleKey::AltTilde => key_mapping::is_alt_tilde(vk, modifiers),
-        }
-    }
-
     /// IME のオン/オフを切り替える。オフにする際は未確定入力をキャンセルする。
     ///
     /// 予約キー（OnPreservedKey）と通常キー（OnKeyDown）の両経路から呼ばれる。
@@ -553,10 +544,8 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
         let modifiers = modifiers_from_keyboard_state();
         let vk = wparam.0 as u16;
 
-        let is_toggle = self.is_toggle_key(vk, &modifiers);
-        let result = if is_toggle {
-            true
-        } else if key_mapping::map_key(vk, &modifiers, ime_on, &self.ctrl_config).is_some() {
+        // トグルキーは予約キーとして OnPreservedKey で処理されるため、ここでは扱わない。
+        let result = if key_mapping::map_key(vk, &modifiers, ime_on, &self.ctrl_config).is_some() {
             // Direct 状態（未入力）では文字入力キー以外を消費せず、アプリに委ねる。
             // これがないと矢印・Backspace・Enter・Space 等が握り潰され、
             // カーソル移動や改行ができなくなる。
@@ -567,8 +556,8 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
         };
 
         debug_log(&format!(
-            "TEST vk=0x{:02X} ctrl={} ime={} toggle={} eat={}",
-            vk, modifiers.ctrl, ime_on, is_toggle, result
+            "TEST vk=0x{:02X} ctrl={} ime={} eat={}",
+            vk, modifiers.ctrl, ime_on, result
         ));
 
         Ok(if result { TRUE } else { FALSE })
@@ -578,13 +567,9 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
         let modifiers = modifiers_from_keyboard_state();
         let vk = wparam.0 as u16;
 
-        // トグルキーの処理（IME のオン/オフに関わらず反応する）。
-        // 予約キーとして登録されているキー（半角/全角・Ctrl+Space 等）は通常
-        // OnPreservedKey に配送されるが、配送されなかった場合のフォールバック。
-        if self.is_toggle_key(vk, &modifiers) {
-            self.handle_toggle(pic)?;
-            return Ok(TRUE);
-        }
+        // トグルキー（半角/全角・Ctrl+Space 等）は予約キーとして登録され、
+        // OnPreservedKey に配送される。ここで二重に処理すると 2 回トグルして
+        // 元に戻ってしまうため、OnKeyDown ではトグル処理を行わない。
 
         let ime_on = *self.ime_on.lock().unwrap();
 
