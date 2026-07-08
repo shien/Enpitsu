@@ -160,6 +160,18 @@ const ROMAJI_TABLE: &[RomajiEntry] = &[
         hiragana: "じょ",
     },
     RomajiEntry {
+        romaji: "zya",
+        hiragana: "じゃ",
+    },
+    RomajiEntry {
+        romaji: "zyu",
+        hiragana: "じゅ",
+    },
+    RomajiEntry {
+        romaji: "zyo",
+        hiragana: "じょ",
+    },
+    RomajiEntry {
         romaji: "dya",
         hiragana: "ぢゃ",
     },
@@ -1038,6 +1050,15 @@ mod tests {
         assert_eq!(convert("dya").output, "ぢゃ");
         assert_eq!(convert("dyu").output, "ぢゅ");
         assert_eq!(convert("dyo").output, "ぢょ");
+    }
+
+    // === じゃ行 (zy 系 = jya 系の別名) ===
+
+    #[test]
+    fn zya_group() {
+        assert_eq!(convert("zya").output, "じゃ");
+        assert_eq!(convert("zyu").output, "じゅ");
+        assert_eq!(convert("zyo").output, "じょ");
     }
 
     // === ふぁ行 ===

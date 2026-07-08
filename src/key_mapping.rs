@@ -34,11 +34,30 @@ pub const VK_N: u16 = 0x4E;
 pub const VK_P: u16 = 0x50;
 pub const VK_Z: u16 = 0x5A;
 pub const VK_F1: u16 = 0x70;
+pub const VK_F7: u16 = 0x76;
 pub const VK_OEM_COMMA: u16 = 0xBC;
 pub const VK_OEM_MINUS: u16 = 0xBD;
 pub const VK_OEM_PERIOD: u16 = 0xBE;
 pub const VK_KANJI: u16 = 0x19;
 pub const VK_OEM_3: u16 = 0xC0; // ` (backtick/tilde)
+pub const VK_OEM_AUTO: u16 = 0xF3; // 半角/全角 が送ることがある VK
+pub const VK_OEM_ENLW: u16 = 0xF4; // 半角/全角 が送ることがある VK
+
+// === TSF 予約キー（PreserveKey）の修飾子ビット ===
+// msctf.h の TF_MOD_* と同じ値。プラットフォーム非依存に扱うため定数で持つ。
+
+pub const TF_MOD_ALT: u32 = 0x0001;
+pub const TF_MOD_CONTROL: u32 = 0x0002;
+pub const TF_MOD_SHIFT: u32 = 0x0004;
+
+/// TSF 予約キー登録に使う仕様（プラットフォーム非依存）。
+///
+/// `modifiers` は msctf.h の TF_MOD_* と同じビット値を用いる。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PreservedKeySpec {
+    pub vk: u16,
+    pub modifiers: u32,
+}
 
 /// 修飾キーの状態。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -211,6 +230,7 @@ pub fn map_key(
             Some(EngineCommand::InsertChar(ch))
         }
         VK_SPACE => Some(EngineCommand::Convert),
+        VK_F7 => Some(EngineCommand::ConvertKatakana),
         VK_RETURN => Some(EngineCommand::Commit),
         VK_ESCAPE => Some(EngineCommand::Cancel),
         VK_BACK => Some(EngineCommand::Backspace),
@@ -226,19 +246,21 @@ pub fn map_key(
     }
 }
 
-/// Ctrl+Space のキー組み合わせかどうかを判定する。
-pub fn is_ctrl_space(vk: u16, modifiers: &Modifiers) -> bool {
-    vk == VK_SPACE && modifiers.ctrl && !modifiers.shift && !modifiers.alt
-}
-
-/// 半角/全角キーかどうかを判定する。
-pub fn is_zenkaku_hankaku(vk: u16, modifiers: &Modifiers) -> bool {
-    vk == VK_KANJI && !modifiers.ctrl && !modifiers.shift && !modifiers.alt
-}
-
-/// Alt+` のキー組み合わせかどうかを判定する。
-pub fn is_alt_tilde(vk: u16, modifiers: &Modifiers) -> bool {
-    vk == VK_OEM_3 && modifiers.alt && !modifiers.ctrl && !modifiers.shift
+/// 文字入力（`InsertChar`）を生成するキーかどうかを判定する。
+///
+/// Direct 状態で消費すべきキーを判別するために使う。
+/// `map_key` の `InsertChar` を返す分岐と同じ条件で判定する。
+/// Ctrl / Alt 押下時は文字入力キーではない。
+pub fn is_character_key(vk: u16, modifiers: &Modifiers) -> bool {
+    if modifiers.ctrl || modifiers.alt {
+        return false;
+    }
+    match vk {
+        VK_A..=VK_Z => true,
+        VK_0..=VK_9 => !modifiers.shift,
+        VK_OEM_MINUS | VK_OEM_PERIOD | VK_OEM_COMMA => true,
+        _ => false,
+    }
 }
 
 /// Ctrl+キーを設定に基づいて EngineCommand に変換する。
@@ -479,6 +501,20 @@ mod tests {
     }
 
     #[test]
+    fn f7_key_converts_katakana() {
+        let config = CtrlKeyConfig::default();
+        let cmd = map_key(VK_F7, &Modifiers::none(), true, &config);
+        assert_eq!(cmd, Some(EngineCommand::ConvertKatakana));
+    }
+
+    #[test]
+    fn f7_key_ime_off_returns_none() {
+        let config = CtrlKeyConfig::default();
+        let cmd = map_key(VK_F7, &Modifiers::none(), false, &config);
+        assert_eq!(cmd, None);
+    }
+
+    #[test]
     fn backspace_key() {
         let config = CtrlKeyConfig::default();
         let cmd = map_key(VK_BACK, &Modifiers::none(), true, &config);
@@ -710,50 +746,50 @@ mod tests {
         assert_eq!(cmd, None);
     }
 
-    // === IME トグルキー検出 ===
+    // === is_character_key ===
 
     #[test]
-    fn ctrl_space_detected() {
-        assert!(is_ctrl_space(VK_SPACE, &Modifiers::ctrl()));
+    fn is_character_key_alphabet() {
+        assert!(is_character_key(VK_A, &Modifiers::none()));
+        assert!(is_character_key(VK_Z, &Modifiers::none()));
+        // Shift+アルファベットも文字入力キー（大文字）
+        assert!(is_character_key(VK_A, &Modifiers::shift()));
     }
 
     #[test]
-    fn space_without_ctrl_is_not_toggle() {
-        assert!(!is_ctrl_space(VK_SPACE, &Modifiers::none()));
+    fn is_character_key_digits() {
+        assert!(is_character_key(VK_0, &Modifiers::none()));
+        assert!(is_character_key(VK_9, &Modifiers::none()));
+        // Shift+数字は記号なので文字入力キーではない
+        assert!(!is_character_key(VK_0, &Modifiers::shift()));
     }
 
     #[test]
-    fn ctrl_space_with_shift_is_not_toggle() {
-        let mods = Modifiers {
-            shift: true,
-            ctrl: true,
-            alt: false,
-        };
-        assert!(!is_ctrl_space(VK_SPACE, &mods));
+    fn is_character_key_punctuation() {
+        assert!(is_character_key(VK_OEM_MINUS, &Modifiers::none()));
+        assert!(is_character_key(VK_OEM_PERIOD, &Modifiers::none()));
+        assert!(is_character_key(VK_OEM_COMMA, &Modifiers::none()));
     }
 
     #[test]
-    fn ctrl_space_with_alt_is_not_toggle() {
-        assert!(!is_ctrl_space(VK_SPACE, &Modifiers::ctrl_alt()));
+    fn is_character_key_non_character_keys() {
+        assert!(!is_character_key(VK_SPACE, &Modifiers::none()));
+        assert!(!is_character_key(VK_RETURN, &Modifiers::none()));
+        assert!(!is_character_key(VK_BACK, &Modifiers::none()));
+        assert!(!is_character_key(VK_LEFT, &Modifiers::none()));
+        assert!(!is_character_key(VK_RIGHT, &Modifiers::none()));
+        assert!(!is_character_key(VK_UP, &Modifiers::none()));
+        assert!(!is_character_key(VK_DOWN, &Modifiers::none()));
+        assert!(!is_character_key(VK_ESCAPE, &Modifiers::none()));
+        assert!(!is_character_key(VK_DELETE, &Modifiers::none()));
     }
 
     #[test]
-    fn zenkaku_hankaku_detected() {
-        assert!(is_zenkaku_hankaku(VK_KANJI, &Modifiers::none()));
+    fn is_character_key_with_ctrl_or_alt() {
+        // Ctrl / Alt 押下時は文字入力キーではない
+        assert!(!is_character_key(VK_A, &Modifiers::ctrl()));
+        assert!(!is_character_key(VK_A, &Modifiers::alt()));
     }
 
-    #[test]
-    fn zenkaku_hankaku_with_ctrl_is_not_toggle() {
-        assert!(!is_zenkaku_hankaku(VK_KANJI, &Modifiers::ctrl()));
-    }
-
-    #[test]
-    fn alt_tilde_detected() {
-        assert!(is_alt_tilde(VK_OEM_3, &Modifiers::alt()));
-    }
-
-    #[test]
-    fn tilde_without_alt_is_not_toggle() {
-        assert!(!is_alt_tilde(VK_OEM_3, &Modifiers::none()));
-    }
+    // IME トグルキーの検出は ToggleKey::matches に一本化した（config.rs のテスト参照）。
 }
