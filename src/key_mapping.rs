@@ -263,21 +263,6 @@ pub fn is_character_key(vk: u16, modifiers: &Modifiers) -> bool {
     }
 }
 
-/// Ctrl+Space のキー組み合わせかどうかを判定する。
-pub fn is_ctrl_space(vk: u16, modifiers: &Modifiers) -> bool {
-    vk == VK_SPACE && modifiers.ctrl && !modifiers.shift && !modifiers.alt
-}
-
-/// 半角/全角キーかどうかを判定する。
-pub fn is_zenkaku_hankaku(vk: u16, modifiers: &Modifiers) -> bool {
-    vk == VK_KANJI && !modifiers.ctrl && !modifiers.shift && !modifiers.alt
-}
-
-/// Alt+` のキー組み合わせかどうかを判定する。
-pub fn is_alt_tilde(vk: u16, modifiers: &Modifiers) -> bool {
-    vk == VK_OEM_3 && modifiers.alt && !modifiers.ctrl && !modifiers.shift
-}
-
 /// Ctrl+キーを設定に基づいて EngineCommand に変換する。
 fn map_ctrl_key(vk: u16, config: &CtrlKeyConfig) -> Option<EngineCommand> {
     match vk {
@@ -806,50 +791,5 @@ mod tests {
         assert!(!is_character_key(VK_A, &Modifiers::alt()));
     }
 
-    // === IME トグルキー検出 ===
-
-    #[test]
-    fn ctrl_space_detected() {
-        assert!(is_ctrl_space(VK_SPACE, &Modifiers::ctrl()));
-    }
-
-    #[test]
-    fn space_without_ctrl_is_not_toggle() {
-        assert!(!is_ctrl_space(VK_SPACE, &Modifiers::none()));
-    }
-
-    #[test]
-    fn ctrl_space_with_shift_is_not_toggle() {
-        let mods = Modifiers {
-            shift: true,
-            ctrl: true,
-            alt: false,
-        };
-        assert!(!is_ctrl_space(VK_SPACE, &mods));
-    }
-
-    #[test]
-    fn ctrl_space_with_alt_is_not_toggle() {
-        assert!(!is_ctrl_space(VK_SPACE, &Modifiers::ctrl_alt()));
-    }
-
-    #[test]
-    fn zenkaku_hankaku_detected() {
-        assert!(is_zenkaku_hankaku(VK_KANJI, &Modifiers::none()));
-    }
-
-    #[test]
-    fn zenkaku_hankaku_with_ctrl_is_not_toggle() {
-        assert!(!is_zenkaku_hankaku(VK_KANJI, &Modifiers::ctrl()));
-    }
-
-    #[test]
-    fn alt_tilde_detected() {
-        assert!(is_alt_tilde(VK_OEM_3, &Modifiers::alt()));
-    }
-
-    #[test]
-    fn tilde_without_alt_is_not_toggle() {
-        assert!(!is_alt_tilde(VK_OEM_3, &Modifiers::none()));
-    }
+    // IME トグルキーの検出は ToggleKey::matches に一本化した（config.rs のテスト参照）。
 }

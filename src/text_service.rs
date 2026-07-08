@@ -340,12 +340,11 @@ impl TextService {
     }
 
     /// 指定されたキーが設定中のトグルキーかどうかを判定する。
+    ///
+    /// 予約登録に使う `preserved_keys()` と同じ仕様で判定するため、登録キー（半角/全角の
+    /// 0x19/0xF3/0xF4 を含む）とフォールバック判定が常に一致する。
     fn is_toggle_key(&self, vk: u16, modifiers: &Modifiers) -> bool {
-        match &self.toggle_key {
-            ToggleKey::CtrlSpace => key_mapping::is_ctrl_space(vk, modifiers),
-            ToggleKey::ZenkakuHankaku => key_mapping::is_zenkaku_hankaku(vk, modifiers),
-            ToggleKey::AltTilde => key_mapping::is_alt_tilde(vk, modifiers),
-        }
+        self.toggle_key.matches(vk, tf_modifiers(modifiers))
     }
 
     /// 指定されたキーが予約キーとして登録済みか（＝OnPreservedKey が処理するか）を判定する。

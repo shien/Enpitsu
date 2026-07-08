@@ -71,6 +71,16 @@ impl ToggleKey {
             }],
         }
     }
+
+    /// 指定の VK と TSF 修飾子ビットが、このトグルキーの登録キー仕様のいずれかに一致するか。
+    ///
+    /// `preserved_keys()` と同じ仕様を参照するため、予約登録するキーとトグル判定が常に
+    /// 一致する。これにより半角/全角の別 VK（0xF3/0xF4）もフォールバック判定で拾える。
+    pub fn matches(&self, vk: u16, tf_modifiers: u32) -> bool {
+        self.preserved_keys()
+            .iter()
+            .any(|spec| spec.vk == vk && spec.modifiers == tf_modifiers)
+    }
 }
 
 /// アプリケーション設定。
@@ -526,6 +536,39 @@ ctrl_d = "delete"
                 modifiers: key_mapping::TF_MOD_ALT,
             }]
         );
+    }
+
+    // === トグルキー一致判定 (matches) ===
+
+    #[test]
+    fn matches_zenkaku_hankaku_all_vks() {
+        let t = ToggleKey::ZenkakuHankaku;
+        // 登録する 3 つの VK すべてで一致する（修飾子なし）
+        assert!(t.matches(key_mapping::VK_KANJI, 0));
+        assert!(t.matches(key_mapping::VK_OEM_AUTO, 0));
+        assert!(t.matches(key_mapping::VK_OEM_ENLW, 0));
+        // 修飾子付きや別キーは一致しない
+        assert!(!t.matches(key_mapping::VK_KANJI, key_mapping::TF_MOD_CONTROL));
+        assert!(!t.matches(key_mapping::VK_SPACE, 0));
+    }
+
+    #[test]
+    fn matches_ctrl_space() {
+        let t = ToggleKey::CtrlSpace;
+        assert!(t.matches(key_mapping::VK_SPACE, key_mapping::TF_MOD_CONTROL));
+        // 修飾子なし・余分な修飾子は一致しない
+        assert!(!t.matches(key_mapping::VK_SPACE, 0));
+        assert!(!t.matches(
+            key_mapping::VK_SPACE,
+            key_mapping::TF_MOD_CONTROL | key_mapping::TF_MOD_SHIFT
+        ));
+    }
+
+    #[test]
+    fn matches_alt_tilde() {
+        let t = ToggleKey::AltTilde;
+        assert!(t.matches(key_mapping::VK_OEM_3, key_mapping::TF_MOD_ALT));
+        assert!(!t.matches(key_mapping::VK_OEM_3, 0));
     }
 
     #[test]
