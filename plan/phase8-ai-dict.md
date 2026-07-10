@@ -1,5 +1,9 @@
 # Phase 8: AI 辞書・設定生成（オフライン IME + AI 事前生成）
 
+> **状態: ⬜ 未着手（2026-07 時点）**
+> `context_priority.rs` / `typo_correction.rs` / `history.rs` は未作成、
+> `Dictionary::load_from_files` も未実装。Phase 7（MeCab）とは独立に着手可能。
+
 ## 方針
 
 **IME ランタイムはネットワーク非依存で動作する。** AI は辞書・設定・補正テーブルの「素材」を事前に生成する用途に限定する。
