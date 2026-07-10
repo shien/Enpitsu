@@ -1,5 +1,9 @@
 # Phase 7.5: Emacs キーバインドの追加（プリセット + 設定で変更可能）
 
+> **状態: ✅ 完了（2026-07 時点）**
+> `keybind_preset`（`none` / `minimal` / `emacs`）と個別上書きを `src/config.rs` に、
+> Ctrl+キー → `EngineCommand` 変換を `src/key_mapping.rs` に実装済み。
+
 ## 目標
 
 Emacs スタイルのキーバインド（Ctrl+キー）を変換エンジンに追加し、

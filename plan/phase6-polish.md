@@ -1,5 +1,11 @@
 # Phase 6: 仕上げ・インストーラー
 
+> **状態: ✅ ほぼ完了（2026-07 時点）**
+> 6.1 ユーザー辞書（`src/user_dictionary.rs`）・6.2 設定（`src/config.rs`）・
+> 6.3 インストーラー（`installer/install.ps1`）・6.5 ドキュメント（`README.md`）は実装済み。
+> 未対応: 6.4 の CI 設定（GitHub Actions `.github/workflows/` 未作成）と `tracing` crate
+> によるログ（現状は `OutputDebugString` の `[Enpitsu]` ログを使用）。
+
 ## 目標
 
 一般ユーザーが簡単にインストール・使用できる状態に仕上げる。

@@ -1,5 +1,9 @@
 # Phase 7: MeCab/形態素解析による高機能変換
 
+> **状態: ⬜ 未着手（2026-07 時点）**
+> 番号順とは前後するが、規模が大きいため Phase 7.5（Emacs キーバインド）を先行実装した。
+> 形態素解析ライブラリ（`lindera` 等）は未導入、`ConversionBackend` trait も未定義。
+
 ## 目標
 
 SKK 方式（ユーザーが変換範囲を指定）から、連文節変換（自動で文節を区切る）へ進化させる。
@@ -21,7 +25,11 @@ MeCab 等の形態素解析を使えば、MS-IME や Google 日本語入力の�
 
 ## 前提
 
-Phase 3 で `ConversionBackend` trait を定義済みであること:
+> **注意:** 当初この節は「Phase 3 で `ConversionBackend` trait を定義済み」と記載していたが、
+> 実際には未定義。本フェーズの最初のタスクとして、SKK 方式（`engine.rs` / `dictionary.rs`）と
+> 形態素解析方式を差し替え可能にするための trait を新規に定義する必要がある。
+
+バックエンドを抽象化する trait（本フェーズで新規定義）:
 
 ```rust
 trait ConversionBackend {

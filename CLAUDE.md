@@ -144,6 +144,7 @@ cargo build --release
 | `tdd` | Red → Green → Refactor サイクルの進め方。機能追加・バグ修正の着手時に使う |
 | `add-romaji` | `src/romaji.rs` の変換テーブルへのエントリ追加手順（テスト込み） |
 | `plan-doc` | `plan/` フォルダの計画ドキュメント作成規約（動作確認セクション必須） |
+| `plan-status` | `plan/` の計画ドキュメントのステータスバナー・状態表を実装の実態に合わせて更新・同期する |
 
 ## Git Workflow
 
