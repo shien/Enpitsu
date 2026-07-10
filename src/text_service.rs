@@ -3,6 +3,7 @@
 //! `ITfTextInputProcessorEx` と `ITfKeyEventSink` を実装し、
 //! Windows の TSF フレームワークと ConversionEngine を接続する。
 
+use std::mem::ManuallyDrop;
 use std::sync::{Arc, Mutex};
 
 use windows::Win32::Foundation::*;
@@ -12,7 +13,8 @@ use windows::core::*;
 
 use crate::config::{Config, ToggleKey};
 use crate::dictionary::Dictionary;
-use crate::engine::{ConversionEngine, EngineCommand, EngineOutput};
+use crate::engine::{ConversionEngine, EngineCommand, EngineOutput, EngineState};
+use crate::guids;
 use crate::key_mapping::{self, CtrlKeyConfig, Modifiers};
 use crate::user_dictionary::UserDictionary;
 
@@ -129,67 +131,62 @@ impl EditSession {
         Ok(())
     }
 
-    /// Composition 範囲内のキャレット位置を `cursor_pos`（先頭からの文字数）に設定する。
-    ///
-    /// `SetText` 後はキャレットが範囲末尾に置かれるため、左右矢印キーで移動した
-    /// 内部カーソル位置を TSF に反映する。SetSelection 失敗時はログのみ出力して続行し、
-    /// テキスト設定自体は無効化しない (Bug 2)。
-    fn set_cursor_position(&self, ec: u32, cursor_pos: usize) -> Result<()> {
-        let comp = self.composition.lock().unwrap();
-        let Some(ref composition) = *comp else {
-            return Ok(());
-        };
-        debug_log(&format!("set_cursor_position: pos={}", cursor_pos));
-        let result: Result<()> = unsafe {
-            let range = composition.GetRange()?;
-            let cloned = range.Clone()?;
-
-            // 1. Range を先頭に collapse（0 幅にする）
-            cloned.Collapse(ec, TF_ANCHOR_START)?;
-
-            // 2. 終了アンカーを cursor_pos 文字分移動
-            let mut shifted: i32 = 0;
-            let halt_cond = TF_HALTCOND::default();
-            cloned.ShiftEnd(ec, cursor_pos as i32, &mut shifted, &halt_cond)?;
-            if shifted != cursor_pos as i32 {
-                debug_log(&format!(
-                    "set_cursor_position: shifted={} != cursor_pos={} (末尾到達)",
-                    shifted, cursor_pos
-                ));
-            }
-
-            // 3. 終了位置で再度 collapse → 0 幅のキャレットにする。
-            //    省略すると Range に幅が残り選択状態になる。
-            cloned.Collapse(ec, TF_ANCHOR_END)?;
-
-            // 4. SetSelection でキャレット位置を反映
-            let mut selection = TF_SELECTION {
-                range: core::mem::ManuallyDrop::new(Some(cloned)),
-                style: TF_SELECTIONSTYLE {
-                    ase: TF_AE_END,
-                    fInterimChar: FALSE,
-                },
-            };
-            let set_result = self
-                .context
-                .SetSelection(ec, core::slice::from_ref(&selection));
-            // TF_SELECTION は入力専用構造体で range (ManuallyDrop) を自動解放しない。
-            // SetSelection 後に明示的に解放して COM 参照リークを防ぐ。
-            core::mem::ManuallyDrop::drop(&mut selection.range);
-            set_result
-        };
-        if let Err(ref e) = result {
-            debug_log(&format!("set_cursor_position FAILED: {:?}", e));
-        }
-        Ok(())
-    }
-
     /// Composition を終了し、参照をクリアする。
     fn finish_composition(&self, ec: u32) -> Result<()> {
         let mut comp = self.composition.lock().unwrap();
         if let Some(composition) = comp.take() {
             unsafe {
                 composition.EndComposition(ec)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Composition 範囲内のキャレット位置を `cursor_pos`（先頭からの文字数）に設定する。
+    ///
+    /// `SetText` はテキストを置換するだけでキャレットを移動しないため、
+    /// `ITfContext::SetSelection` で明示的に 0 幅の選択（キャレット）を設定する。
+    fn set_cursor_position(&self, ec: u32, cursor_pos: usize) -> Result<()> {
+        let comp = self.composition.lock().unwrap();
+        if let Some(ref composition) = *comp {
+            unsafe {
+                let range = composition.GetRange()?;
+                let cloned = range.Clone()?;
+
+                // 範囲を先頭に collapse（0 幅にする）
+                cloned.Collapse(ec, TF_ANCHOR_START)?;
+
+                // 終了アンカーを cursor_pos 文字分だけ前方へ移動
+                let mut shifted: i32 = 0;
+                let halt_cond = TF_HALTCOND::default();
+                cloned.ShiftEnd(ec, cursor_pos as i32, &mut shifted, &halt_cond)?;
+                if shifted != cursor_pos as i32 {
+                    debug_log(&format!(
+                        "set_cursor_position: shifted={} != cursor_pos={}",
+                        shifted, cursor_pos
+                    ));
+                }
+
+                // 終了位置で再度 collapse → 0 幅のキャレットにする
+                cloned.Collapse(ec, TF_ANCHOR_END)?;
+
+                let mut selection = TF_SELECTION {
+                    range: ManuallyDrop::new(Some(cloned)),
+                    style: TF_SELECTIONSTYLE {
+                        ase: TF_AE_END,
+                        fInterimChar: FALSE,
+                    },
+                };
+                debug_log(&format!("set_cursor_position: pos={}", cursor_pos));
+                // SetSelection は範囲を内部で AddRef するため、渡した後はこちらの
+                // クローン参照を解放する必要がある。range は ManuallyDrop に move
+                // されており自動 Drop されないので、呼び出し後に明示的に drop して
+                // キー入力ごとの ITfRange リークを防ぐ。
+                let result = self
+                    .context
+                    .SetSelection(ec, std::slice::from_ref(&selection));
+                ManuallyDrop::drop(&mut selection.range);
+                result?;
             }
         }
         Ok(())
@@ -201,18 +198,19 @@ impl ITfEditSession_Impl for EditSession_Impl {
         debug_log(&format!("DoEditSession called, ec={}", ec));
         let result = match &self.action {
             EditAction::SetText { text, cursor_pos } => {
-                debug_log(&format!(
-                    "DoEditSession: SetText('{}', cursor_pos={})",
-                    text, cursor_pos
-                ));
+                debug_log(&format!("DoEditSession: SetText('{}')", text));
                 self.ensure_composition(ec)
                     .and_then(|()| self.write_text(ec, text))
                     .and_then(|()| self.set_cursor_position(ec, *cursor_pos))
             }
             EditAction::CommitText(text) => {
                 debug_log(&format!("DoEditSession: CommitText('{}')", text));
+                // 確定文字列の末尾へキャレットを移動してから Composition を終了する。
+                // これを省くと確定語の先頭にキャレットが戻る。
+                let caret = text.chars().count();
                 self.ensure_composition(ec)
                     .and_then(|()| self.write_text(ec, text))
+                    .and_then(|()| self.set_cursor_position(ec, caret))
                     .and_then(|()| self.finish_composition(ec))
             }
             EditAction::CommitAndCompose {
@@ -221,11 +219,15 @@ impl ITfEditSession_Impl for EditSession_Impl {
                 cursor_pos,
             } => {
                 debug_log(&format!(
-                    "DoEditSession: CommitAndCompose('{}', '{}', cursor_pos={})",
-                    committed, display, cursor_pos
+                    "DoEditSession: CommitAndCompose('{}', '{}')",
+                    committed, display
                 ));
+                // 確定部分の末尾へキャレットを移動してから終了し、
+                // 続く新規 Composition が確定語の後ろから始まるようにする。
+                let committed_caret = committed.chars().count();
                 self.ensure_composition(ec)
                     .and_then(|()| self.write_text(ec, committed))
+                    .and_then(|()| self.set_cursor_position(ec, committed_caret))
                     .and_then(|()| self.finish_composition(ec))
                     .and_then(|()| self.ensure_composition(ec))
                     .and_then(|()| self.write_text(ec, display))
@@ -256,6 +258,9 @@ pub struct TextService {
     composition: Arc<Mutex<Option<ITfComposition>>>,
     ctrl_config: CtrlKeyConfig,
     toggle_key: ToggleKey,
+    /// PreserveKey で登録済みの予約キー（GUID とキー仕様）。
+    /// OnPreservedKey での照合と Deactivate 時の解除に使う。
+    preserved: Mutex<Vec<(GUID, TF_PRESERVEDKEY)>>,
 }
 
 impl TextService {
@@ -300,6 +305,7 @@ impl TextService {
             composition: Arc::new(Mutex::new(None)),
             ctrl_config,
             toggle_key,
+            preserved: Mutex::new(Vec::new()),
         }
     }
 
@@ -333,13 +339,62 @@ impl TextService {
             .map(|p| p.to_path_buf())
     }
 
-    /// 指定されたキーがトグルキーかどうかを判定する。
-    fn is_toggle_key(&self, vk: u16, modifiers: &key_mapping::Modifiers) -> bool {
-        match &self.toggle_key {
-            ToggleKey::CtrlSpace => key_mapping::is_ctrl_space(vk, modifiers),
-            ToggleKey::ZenkakuHankaku => key_mapping::is_zenkaku_hankaku(vk, modifiers),
-            ToggleKey::AltTilde => key_mapping::is_alt_tilde(vk, modifiers),
+    /// 指定されたキーが設定中のトグルキーかどうかを判定する。
+    ///
+    /// 予約登録に使う `preserved_keys()` と同じ仕様で判定するため、登録キー（半角/全角の
+    /// 0x19/0xF3/0xF4 を含む）とフォールバック判定が常に一致する。
+    fn is_toggle_key(&self, vk: u16, modifiers: &Modifiers) -> bool {
+        self.toggle_key.matches(vk, tf_modifiers(modifiers))
+    }
+
+    /// 指定されたキーが予約キーとして登録済みか（＝OnPreservedKey が処理するか）を判定する。
+    ///
+    /// PreserveKey の登録に成功したキーは OnPreservedKey で処理されるため、OnKeyDown で
+    /// 重ねて処理すると二重トグルになる。逆に登録に失敗したキーは OnPreservedKey に届かない
+    /// ため、OnKeyDown 側でフォールバック処理する必要がある。その区別に使う。
+    fn is_preserved(&self, vk: u16, modifiers: &Modifiers) -> bool {
+        let tf_mods = tf_modifiers(modifiers);
+        self.preserved
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|(_, key)| key.uVKey == vk as u32 && key.uModifiers == tf_mods)
+    }
+
+    /// トグルキーのうち、予約キー登録に失敗して OnKeyDown で処理すべきものかを判定する。
+    fn is_toggle_fallback(&self, vk: u16, modifiers: &Modifiers) -> bool {
+        self.is_toggle_key(vk, modifiers) && !self.is_preserved(vk, modifiers)
+    }
+
+    /// IME のオン/オフを切り替える。オフにする際は未確定入力をキャンセルする。
+    ///
+    /// 予約キー（OnPreservedKey）と通常キー（OnKeyDown フォールバック）の両経路から呼ばれる。
+    fn handle_toggle(&self, pic: Option<&ITfContext>) -> Result<()> {
+        let mut ime_on = self.ime_on.lock().unwrap();
+        *ime_on = !*ime_on;
+        let now_on = *ime_on;
+        drop(ime_on);
+        debug_log(&format!(
+            "handle_toggle: IME toggled to {}",
+            if now_on { "ON" } else { "OFF" }
+        ));
+
+        if !now_on {
+            // IME をオフにする際、未確定入力をキャンセルする
+            let mut engine = self.engine.lock().unwrap();
+            let output = engine.process(EngineCommand::Cancel);
+            drop(engine);
+            if let Some(context) = pic {
+                if let Err(e) = self.update_composition(context, &output) {
+                    debug_log(&format!(
+                        "handle_toggle: update_composition FAILED: {:?}",
+                        e
+                    ));
+                    return Err(e);
+                }
+            }
         }
+        Ok(())
     }
 
     /// EngineOutput に基づいて EditSession を発行し、Composition を更新する。
@@ -425,6 +480,36 @@ impl ITfTextInputProcessorEx_Impl for TextService_Impl {
 
         debug_log("ActivateEx: AdviseKeyEventSink succeeded");
 
+        // 入力モードトグルキー（半角/全角・Ctrl+Space 等）を予約キーとして登録する。
+        // これがないと 半角/全角 のようなモード制御キーは OnKeyDown に配送されず、
+        // トグルが機能しない。予約キーは OnPreservedKey に配送される。
+        let specs = self.toggle_key.preserved_keys();
+        let key_guids = guids::preservedkey_guids();
+        let desc: Vec<u16> = "Enpitsu IME Toggle".encode_utf16().collect();
+        let mut registered: Vec<(GUID, TF_PRESERVEDKEY)> = Vec::new();
+        for (spec, guid) in specs.iter().zip(key_guids.iter()) {
+            let key = TF_PRESERVEDKEY {
+                uVKey: spec.vk as u32,
+                uModifiers: spec.modifiers,
+            };
+            match unsafe { keystroke_mgr.PreserveKey(tid, guid, &key, &desc) } {
+                Ok(()) => {
+                    debug_log(&format!(
+                        "ActivateEx: PreserveKey vk=0x{:02X} mod=0x{:X} registered",
+                        spec.vk, spec.modifiers
+                    ));
+                    registered.push((*guid, key));
+                }
+                Err(e) => {
+                    debug_log(&format!(
+                        "ActivateEx: PreserveKey vk=0x{:02X} FAILED: {:?}",
+                        spec.vk, e
+                    ));
+                }
+            }
+        }
+        *self.preserved.lock().unwrap() = registered;
+
         *self.thread_mgr.lock().unwrap() = Some(thread_mgr);
         *self.client_id.lock().unwrap() = tid;
         *self.ime_on.lock().unwrap() = true;
@@ -449,6 +534,10 @@ impl ITfTextInputProcessor_Impl for TextService_Impl {
             if let Ok(keystroke_mgr) = thread_mgr.cast::<ITfKeystrokeMgr>() {
                 unsafe {
                     let _ = keystroke_mgr.UnadviseKeyEventSink(tid);
+                    // 登録済みの予約キーを解除する。
+                    for (guid, key) in self.preserved.lock().unwrap().drain(..) {
+                        let _ = keystroke_mgr.UnpreserveKey(&guid, &key);
+                    }
                 }
             }
         }
@@ -490,21 +579,24 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
         let modifiers = modifiers_from_keyboard_state();
         let vk = wparam.0 as u16;
 
-        let is_toggle = self.is_toggle_key(vk, &modifiers);
-        let result = if is_toggle {
+        // トグルキーは通常は予約キーとして OnPreservedKey で処理されるため扱わない。
+        // ただし PreserveKey 登録に失敗したキーは OnKeyDown で処理するため、ここでも消費する。
+        let is_toggle_fallback = self.is_toggle_fallback(vk, &modifiers);
+        let result = if is_toggle_fallback {
             true
-        } else {
-            // エンジンの状態を考慮し、その状態で意味のあるキーのみ消費する。
-            // Direct で矢印・Enter 等を消費しない (Bug 1)、Composing で上下矢印を
-            // 消費しない (Bug 3)、Converting でカーソル移動・Delete を消費しない (Bug 4)。
-            let command = key_mapping::map_key(vk, &modifiers, ime_on, &self.ctrl_config);
+        } else if key_mapping::map_key(vk, &modifiers, ime_on, &self.ctrl_config).is_some() {
+            // Direct 状態（未入力）では文字入力キー以外を消費せず、アプリに委ねる。
+            // これがないと矢印・Backspace・Enter・Space 等が握り潰され、
+            // カーソル移動や改行ができなくなる。
             let state = self.engine.lock().unwrap().state();
-            key_mapping::should_consume_key(state, &command)
+            state != EngineState::Direct || key_mapping::is_character_key(vk, &modifiers)
+        } else {
+            false
         };
 
         debug_log(&format!(
-            "TEST vk=0x{:02X} ctrl={} ime={} toggle={} eat={}",
-            vk, modifiers.ctrl, ime_on, is_toggle, result
+            "TEST vk=0x{:02X} ctrl={} ime={} toggle_fb={} eat={}",
+            vk, modifiers.ctrl, ime_on, is_toggle_fallback, result
         ));
 
         Ok(if result { TRUE } else { FALSE })
@@ -514,80 +606,38 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
         let modifiers = modifiers_from_keyboard_state();
         let vk = wparam.0 as u16;
 
-        // トグルキーの処理（IME のオン/オフに関わらず反応する）
-        if self.is_toggle_key(vk, &modifiers) {
-            let mut ime_on = self.ime_on.lock().unwrap();
-            *ime_on = !*ime_on;
-            let now_on = *ime_on;
-            drop(ime_on);
-            debug_log(&format!(
-                "OnKeyDown: IME toggled to {}",
-                if now_on { "ON" } else { "OFF" }
-            ));
-            if !now_on {
-                // IME をオフにする際、未確定入力をキャンセルする
-                let mut engine = self.engine.lock().unwrap();
-                let output = engine.process(EngineCommand::Cancel);
-                drop(engine);
-                if let Some(context) = pic {
-                    if let Err(e) = self.update_composition(context, &output) {
-                        debug_log(&format!(
-                            "OnKeyDown: toggle off update_composition FAILED: {:?}",
-                            e
-                        ));
-                        return Err(e);
-                    }
-                }
-            }
+        // トグルキー（半角/全角・Ctrl+Space 等）は通常 PreserveKey により予約され、
+        // OnPreservedKey に配送される。登録済みのキーをここで重ねて処理すると 2 回
+        // トグルして元に戻るため扱わない。ただし登録に失敗したキー（他 TIP が予約済み等）
+        // は OnPreservedKey に届かないため、フォールバックとしてここで処理する。
+        if self.is_toggle_fallback(vk, &modifiers) {
+            debug_log("OnKeyDown: toggle fallback (PreserveKey 未登録)");
+            self.handle_toggle(pic)?;
             return Ok(TRUE);
         }
 
         let ime_on = *self.ime_on.lock().unwrap();
 
-        let command = key_mapping::map_key(vk, &modifiers, ime_on, &self.ctrl_config);
-
-        // エンジンの状態でこのキーを消費すべきか判定する。
-        // 消費しない場合はアプリに渡す（OnTestKeyDown の判定と一致させる）。
-        let mut engine = self.engine.lock().unwrap();
-        let state = engine.state();
-        if !key_mapping::should_consume_key(state, &command) {
-            // Composition がアクティブな状態でカーソル移動・削除・候補ナビを
-            // そのまま渡すと、IME の Composition とアプリのキャレットがずれ、
-            // 次の消費キーで古い候補が誤った位置に確定される。該当キーは
-            // 渡す前に未確定入力を確定してから FALSE を返す。
-            if key_mapping::should_commit_before_passthrough(state, &command) {
-                let output = engine.process(EngineCommand::Commit);
-                drop(engine);
-                if let Some(context) = pic {
-                    if let Err(e) = self.update_composition(context, &output) {
-                        debug_log(&format!(
-                            "OnKeyDown: commit-before-passthrough FAILED: {:?}",
-                            e
-                        ));
-                        return Err(e);
-                    }
-                }
-                debug_log(&format!(
-                    "OnKeyDown: vk=0x{:02X} committed before passing in {:?}",
-                    vk, state
-                ));
-            } else {
-                drop(engine);
-                debug_log(&format!(
-                    "OnKeyDown: vk=0x{:02X} not consumed in {:?}, passing",
-                    vk, state
-                ));
-            }
+        let Some(command) = key_mapping::map_key(vk, &modifiers, ime_on, &self.ctrl_config) else {
+            debug_log(&format!("OnKeyDown: vk=0x{:02X} not mapped, passing", vk));
             return Ok(FALSE);
-        }
-        // should_consume_key が true を返すのは command が Some のときのみ。
-        let command = command.expect("should_consume_key guarantees Some");
+        };
 
         debug_log(&format!(
             "OnKeyDown: vk=0x{:02X}, command={:?}",
             vk, command
         ));
 
+        let mut engine = self.engine.lock().unwrap();
+        // Direct 状態では文字入力キー以外は消費せずアプリに委ねる（OnTestKeyDown と整合）。
+        if engine.state() == EngineState::Direct && !key_mapping::is_character_key(vk, &modifiers) {
+            drop(engine);
+            debug_log(&format!(
+                "OnKeyDown: vk=0x{:02X} not consumed in Direct state, passing",
+                vk
+            ));
+            return Ok(FALSE);
+        }
         let output = engine.process(command);
         drop(engine);
 
@@ -624,8 +674,28 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
         Ok(FALSE)
     }
 
-    fn OnPreservedKey(&self, _pic: Option<&ITfContext>, _rguid: *const GUID) -> Result<BOOL> {
-        Ok(FALSE)
+    // rguid は TSF 側が有効なポインタを渡す。トレイトのシグネチャは固定のため
+    // unsafe を付けられず、null チェックの上で参照する。
+    #[allow(clippy::not_unsafe_ptr_arg_deref)]
+    fn OnPreservedKey(&self, pic: Option<&ITfContext>, rguid: *const GUID) -> Result<BOOL> {
+        if rguid.is_null() {
+            return Ok(FALSE);
+        }
+        let guid = unsafe { *rguid };
+        let is_toggle = self
+            .preserved
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|(g, _)| *g == guid);
+        if is_toggle {
+            debug_log("OnPreservedKey: toggle key");
+            self.handle_toggle(pic)?;
+            Ok(TRUE)
+        } else {
+            debug_log("OnPreservedKey: unknown guid, passing");
+            Ok(FALSE)
+        }
     }
 }
 
@@ -646,4 +716,19 @@ fn modifiers_from_keyboard_state() -> Modifiers {
             alt: GetKeyState(key_mapping::VK_MENU as i32) < 0,
         }
     }
+}
+
+/// `Modifiers` を TSF 予約キーの修飾子ビット（TF_MOD_*）に変換する。
+fn tf_modifiers(m: &Modifiers) -> u32 {
+    let mut bits = 0;
+    if m.alt {
+        bits |= key_mapping::TF_MOD_ALT;
+    }
+    if m.ctrl {
+        bits |= key_mapping::TF_MOD_CONTROL;
+    }
+    if m.shift {
+        bits |= key_mapping::TF_MOD_SHIFT;
+    }
+    bits
 }

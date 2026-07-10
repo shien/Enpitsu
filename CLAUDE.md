@@ -14,6 +14,8 @@ This file provides guidance for AI assistants (including Claude Code) working in
 ```
 Enpitsu/
 ├── Cargo.toml         # Rust package manifest (encoding_rs, windows)
+├── .claude/
+│   └── skills/        # Claude Code 用 Skills（下記「Skills」参照）
 ├── src/
 │   ├── lib.rs         # Crate root (module declarations + DLL exports)
 │   ├── romaji.rs      # ローマ字 → ひらがな変換
@@ -130,6 +132,18 @@ cargo build --release
 - 変換テーブルにエントリを追加したら、対応するテストも追加する。
 - **計画時に動作確認方法を明記する。** 各フェーズ（Red / Green / Refactor）で何をどう確認するかを、作業開始前に計画として書き出すこと。
 - **計画ドキュメントの各タスクに動作確認を書く。** `plan/` フォルダの各フェーズファイルでは、タスクごとに「**動作確認:**」セクションを設け、具体的な確認手順（実行するコマンド、期待する結果、手動確認の内容）を明記すること。
+
+## Skills
+
+`.claude/skills/` に、このリポジトリの定型作業を支援する Skills を定義している。
+該当する作業を行うときは対応する Skill を使うこと。
+
+| Skill | 用途 |
+|-------|------|
+| `verify` | 品質ゲート（`cargo test` / `cargo clippy -- -D warnings` / `cargo fmt -- --check`）。コード変更後・コミット前に必ず実行する |
+| `tdd` | Red → Green → Refactor サイクルの進め方。機能追加・バグ修正の着手時に使う |
+| `add-romaji` | `src/romaji.rs` の変換テーブルへのエントリ追加手順（テスト込み） |
+| `plan-doc` | `plan/` フォルダの計画ドキュメント作成規約（動作確認セクション必須） |
 
 ## Git Workflow
 

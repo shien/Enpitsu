@@ -33,3 +33,31 @@ pub fn guid_profile() -> windows::core::GUID {
         data4: [0x8D, 0x3E, 0x7F, 0x0B, 0x2C, 0x5A, 0x6E, 0x9D],
     }
 }
+
+/// 入力モードトグル用の予約キー GUID 群。
+///
+/// `ITfKeystrokeMgr::PreserveKey` は 1 つの予約キーごとに一意な GUID を必要とする。
+/// 半角/全角 は複数の VK を登録するため、複数の GUID を用意する。
+#[cfg(windows)]
+pub fn preservedkey_guids() -> [windows::core::GUID; 3] {
+    [
+        windows::core::GUID {
+            data1: 0x7E9A1B20,
+            data2: 0x0001,
+            data3: 0x4C3D,
+            data4: [0x8E, 0x5F, 0xA0, 0xB1, 0xC2, 0xD3, 0xE4, 0xF0],
+        },
+        windows::core::GUID {
+            data1: 0x7E9A1B20,
+            data2: 0x0002,
+            data3: 0x4C3D,
+            data4: [0x8E, 0x5F, 0xA0, 0xB1, 0xC2, 0xD3, 0xE4, 0xF0],
+        },
+        windows::core::GUID {
+            data1: 0x7E9A1B20,
+            data2: 0x0003,
+            data3: 0x4C3D,
+            data4: [0x8E, 0x5F, 0xA0, 0xB1, 0xC2, 0xD3, 0xE4, 0xF0],
+        },
+    ]
+}
