@@ -4,7 +4,7 @@
 //! ConversionEngine に渡す EngineCommand に変換する。
 //! プラットフォーム非依存のため、どの OS でもテスト可能。
 
-use crate::engine::EngineCommand;
+use crate::engine::{EngineCommand, EngineState};
 
 // === 仮想キーコード定数 ===
 
@@ -261,6 +261,74 @@ pub fn is_character_key(vk: u16, modifiers: &Modifiers) -> bool {
         VK_OEM_MINUS | VK_OEM_PERIOD | VK_OEM_COMMA => true,
         _ => false,
     }
+}
+
+/// エンジンの状態から、マップ済みキーを IME が消費すべきか判定する。
+///
+/// IME がキーを消費（`OnTestKeyDown`/`OnKeyDown` で `TRUE` を返す）すると、
+/// そのキーはアプリケーションに渡らない。各状態で「実行しても何も起きない」
+/// コマンドは消費せず、アプリに委ねることでカーソル移動・改行・空白入力などの
+/// 通常操作を妨げないようにする。
+///
+/// - Direct: 文字入力キーのみ消費する。矢印・Backspace・Enter・Space・
+///   Escape・Delete はアプリに渡す (Bug 1)。
+/// - Composing: 候補ナビゲーション (`NextCandidate`/`PrevCandidate`) は候補が
+///   存在しないため消費しない。上下矢印はアプリに渡す (Bug 3)。
+/// - Converting: カーソル移動 (`CursorLeft`/`CursorRight`) と `Delete` は
+///   消費しない。アプリに渡す (Bug 4)。
+pub fn should_consume_key(
+    state: EngineState,
+    vk: u16,
+    modifiers: &Modifiers,
+    command: &Option<EngineCommand>,
+) -> bool {
+    let Some(command) = command else {
+        return false;
+    };
+    match state {
+        // Direct: 文字入力キーのみ消費し、それ以外はアプリに委ねる
+        EngineState::Direct => is_character_key(vk, modifiers),
+        // Composing: 候補ナビは消費しない（候補が無いため無意味）
+        EngineState::Composing => !matches!(
+            command,
+            EngineCommand::NextCandidate | EngineCommand::PrevCandidate
+        ),
+        // Converting: カーソル移動・Delete は消費しない
+        EngineState::Converting => !matches!(
+            command,
+            EngineCommand::CursorLeft | EngineCommand::CursorRight | EngineCommand::Delete
+        ),
+    }
+}
+
+/// 消費しない（アプリに渡す）キーを渡す前に、未確定入力を確定すべきか判定する。
+///
+/// `should_consume_key` が `false`（アプリに委ねる）を返すキーのうち、
+/// Composition がアクティブな状態でカーソル移動・削除・候補ナビをアプリに渡すと、
+/// IME が保持する Composition とアプリ側のキャレット位置がずれる。その状態で
+/// 次の消費キーが来ると、古い候補が誤った位置に確定されてしまう。
+///
+/// これを防ぐため、以下のキーはアプリに渡す前に現在の入力を確定する:
+/// - Composing で上下矢印（`NextCandidate`/`PrevCandidate`）
+/// - Converting でカーソル移動（`CursorLeft`/`CursorRight`）・`Delete`
+///
+/// Direct 状態は Composition が無いため確定不要。マップされないキー
+/// （修飾キー単体・ファンクションキー等）も確定しない。
+pub fn should_commit_before_passthrough(
+    state: EngineState,
+    command: &Option<EngineCommand>,
+) -> bool {
+    let Some(command) = command else {
+        return false;
+    };
+    matches!(
+        (state, command),
+        (EngineState::Composing, EngineCommand::NextCandidate)
+            | (EngineState::Composing, EngineCommand::PrevCandidate)
+            | (EngineState::Converting, EngineCommand::CursorLeft)
+            | (EngineState::Converting, EngineCommand::CursorRight)
+            | (EngineState::Converting, EngineCommand::Delete)
+    )
 }
 
 /// Ctrl+キーを設定に基づいて EngineCommand に変換する。
@@ -792,4 +860,223 @@ mod tests {
     }
 
     // IME トグルキーの検出は ToggleKey::matches に一本化した（config.rs のテスト参照）。
+
+    // === should_consume_key: 状態に応じたキー消費判定 ===
+
+    use EngineState::*;
+
+    // マップされないキー（None）は消費しない
+    #[test]
+    fn consume_none_command_is_false() {
+        assert!(!should_consume_key(
+            Direct,
+            VK_F1,
+            &Modifiers::none(),
+            &None
+        ));
+        assert!(!should_consume_key(
+            Composing,
+            VK_F1,
+            &Modifiers::none(),
+            &None
+        ));
+        assert!(!should_consume_key(
+            Converting,
+            VK_F1,
+            &Modifiers::none(),
+            &None
+        ));
+    }
+
+    // Direct: 文字入力キーのみ消費 (Bug 1)
+    #[test]
+    fn consume_direct_character_key_is_true() {
+        assert!(should_consume_key(
+            Direct,
+            VK_A,
+            &Modifiers::none(),
+            &Some(EngineCommand::InsertChar('a'))
+        ));
+    }
+
+    #[test]
+    fn consume_direct_arrow_is_false() {
+        assert!(!should_consume_key(
+            Direct,
+            VK_LEFT,
+            &Modifiers::none(),
+            &Some(EngineCommand::CursorLeft)
+        ));
+    }
+
+    #[test]
+    fn consume_direct_enter_is_false() {
+        assert!(!should_consume_key(
+            Direct,
+            VK_RETURN,
+            &Modifiers::none(),
+            &Some(EngineCommand::Commit)
+        ));
+    }
+
+    // Composing: 上下矢印（候補ナビ）は消費しない (Bug 3)
+    #[test]
+    fn consume_composing_next_candidate_is_false() {
+        assert!(!should_consume_key(
+            Composing,
+            VK_DOWN,
+            &Modifiers::none(),
+            &Some(EngineCommand::NextCandidate)
+        ));
+    }
+
+    #[test]
+    fn consume_composing_prev_candidate_is_false() {
+        assert!(!should_consume_key(
+            Composing,
+            VK_UP,
+            &Modifiers::none(),
+            &Some(EngineCommand::PrevCandidate)
+        ));
+    }
+
+    #[test]
+    fn consume_composing_cursor_and_char_is_true() {
+        assert!(should_consume_key(
+            Composing,
+            VK_LEFT,
+            &Modifiers::none(),
+            &Some(EngineCommand::CursorLeft)
+        ));
+        assert!(should_consume_key(
+            Composing,
+            VK_A,
+            &Modifiers::none(),
+            &Some(EngineCommand::InsertChar('a'))
+        ));
+    }
+
+    // Converting: カーソル移動・Delete は消費しない (Bug 4)
+    #[test]
+    fn consume_converting_cursor_left_is_false() {
+        assert!(!should_consume_key(
+            Converting,
+            VK_LEFT,
+            &Modifiers::none(),
+            &Some(EngineCommand::CursorLeft)
+        ));
+    }
+
+    #[test]
+    fn consume_converting_cursor_right_is_false() {
+        assert!(!should_consume_key(
+            Converting,
+            VK_RIGHT,
+            &Modifiers::none(),
+            &Some(EngineCommand::CursorRight)
+        ));
+    }
+
+    #[test]
+    fn consume_converting_delete_is_false() {
+        assert!(!should_consume_key(
+            Converting,
+            VK_DELETE,
+            &Modifiers::none(),
+            &Some(EngineCommand::Delete)
+        ));
+    }
+
+    #[test]
+    fn consume_converting_candidate_nav_is_true() {
+        assert!(should_consume_key(
+            Converting,
+            VK_DOWN,
+            &Modifiers::none(),
+            &Some(EngineCommand::NextCandidate)
+        ));
+        assert!(should_consume_key(
+            Converting,
+            VK_RETURN,
+            &Modifiers::none(),
+            &Some(EngineCommand::Commit)
+        ));
+    }
+
+    // === should_commit_before_passthrough: 渡す前に確定すべきか ===
+
+    #[test]
+    fn commit_before_passthrough_none_is_false() {
+        assert!(!should_commit_before_passthrough(Direct, &None));
+        assert!(!should_commit_before_passthrough(Composing, &None));
+        assert!(!should_commit_before_passthrough(Converting, &None));
+    }
+
+    #[test]
+    fn commit_before_passthrough_converting_cursor_and_delete() {
+        assert!(should_commit_before_passthrough(
+            Converting,
+            &Some(EngineCommand::CursorLeft)
+        ));
+        assert!(should_commit_before_passthrough(
+            Converting,
+            &Some(EngineCommand::CursorRight)
+        ));
+        assert!(should_commit_before_passthrough(
+            Converting,
+            &Some(EngineCommand::Delete)
+        ));
+    }
+
+    #[test]
+    fn commit_before_passthrough_composing_candidate_nav() {
+        assert!(should_commit_before_passthrough(
+            Composing,
+            &Some(EngineCommand::NextCandidate)
+        ));
+        assert!(should_commit_before_passthrough(
+            Composing,
+            &Some(EngineCommand::PrevCandidate)
+        ));
+    }
+
+    #[test]
+    fn commit_before_passthrough_consumed_keys_are_false() {
+        // 消費するキーや Direct（Composition 無し）は確定対象外
+        assert!(!should_commit_before_passthrough(
+            Converting,
+            &Some(EngineCommand::NextCandidate)
+        ));
+        assert!(!should_commit_before_passthrough(
+            Composing,
+            &Some(EngineCommand::CursorLeft)
+        ));
+        assert!(!should_commit_before_passthrough(
+            Direct,
+            &Some(EngineCommand::CursorLeft)
+        ));
+    }
+
+    // 不変条件: 確定対象なら必ず非消費キーである
+    #[test]
+    fn commit_before_passthrough_implies_not_consumed() {
+        // 確定対象となる (状態, コマンド, vk) の組
+        let cases = [
+            (Composing, EngineCommand::NextCandidate, VK_DOWN),
+            (Composing, EngineCommand::PrevCandidate, VK_UP),
+            (Converting, EngineCommand::CursorLeft, VK_LEFT),
+            (Converting, EngineCommand::CursorRight, VK_RIGHT),
+            (Converting, EngineCommand::Delete, VK_DELETE),
+        ];
+        for (state, command, vk) in cases {
+            let cmd = Some(command.clone());
+            assert!(should_commit_before_passthrough(state, &cmd));
+            assert!(
+                !should_consume_key(state, vk, &Modifiers::none(), &cmd),
+                "確定対象 {:?}/{:?} は非消費キーであるべき",
+                state,
+                command
+            );
+        }
+    }
 }

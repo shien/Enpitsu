@@ -13,7 +13,7 @@ use windows::core::*;
 
 use crate::config::{Config, ToggleKey};
 use crate::dictionary::Dictionary;
-use crate::engine::{ConversionEngine, EngineCommand, EngineOutput, EngineState};
+use crate::engine::{ConversionEngine, EngineCommand, EngineOutput};
 use crate::guids;
 use crate::key_mapping::{self, CtrlKeyConfig, Modifiers};
 use crate::user_dictionary::UserDictionary;
@@ -584,14 +584,13 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
         let is_toggle_fallback = self.is_toggle_fallback(vk, &modifiers);
         let result = if is_toggle_fallback {
             true
-        } else if key_mapping::map_key(vk, &modifiers, ime_on, &self.ctrl_config).is_some() {
-            // Direct 状態（未入力）では文字入力キー以外を消費せず、アプリに委ねる。
-            // これがないと矢印・Backspace・Enter・Space 等が握り潰され、
-            // カーソル移動や改行ができなくなる。
-            let state = self.engine.lock().unwrap().state();
-            state != EngineState::Direct || key_mapping::is_character_key(vk, &modifiers)
         } else {
-            false
+            // エンジンの状態でこのキーを消費すべきか判定する。
+            // Direct では文字入力キーのみ消費 (Bug 1)、Composing では上下矢印を
+            // 消費しない (Bug 3)、Converting ではカーソル移動・Delete を消費しない (Bug 4)。
+            let command = key_mapping::map_key(vk, &modifiers, ime_on, &self.ctrl_config);
+            let state = self.engine.lock().unwrap().state();
+            key_mapping::should_consume_key(state, vk, &modifiers, &command)
         };
 
         debug_log(&format!(
@@ -618,26 +617,49 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
 
         let ime_on = *self.ime_on.lock().unwrap();
 
-        let Some(command) = key_mapping::map_key(vk, &modifiers, ime_on, &self.ctrl_config) else {
-            debug_log(&format!("OnKeyDown: vk=0x{:02X} not mapped, passing", vk));
+        let command = key_mapping::map_key(vk, &modifiers, ime_on, &self.ctrl_config);
+
+        // エンジンの状態でこのキーを消費すべきか判定する（OnTestKeyDown と整合）。
+        let mut engine = self.engine.lock().unwrap();
+        let state = engine.state();
+        if !key_mapping::should_consume_key(state, vk, &modifiers, &command) {
+            // Composition がアクティブな状態でカーソル移動・削除・候補ナビを
+            // そのまま渡すと、IME の Composition とアプリのキャレットがずれ、
+            // 次の消費キーで古い候補が誤った位置に確定される。該当キーは
+            // 渡す前に未確定入力を確定してから FALSE を返す。
+            if key_mapping::should_commit_before_passthrough(state, &command) {
+                let output = engine.process(EngineCommand::Commit);
+                drop(engine);
+                if let Some(context) = pic {
+                    if let Err(e) = self.update_composition(context, &output) {
+                        debug_log(&format!(
+                            "OnKeyDown: commit-before-passthrough FAILED: {:?}",
+                            e
+                        ));
+                        return Err(e);
+                    }
+                }
+                debug_log(&format!(
+                    "OnKeyDown: vk=0x{:02X} committed before passing in {:?}",
+                    vk, state
+                ));
+            } else {
+                drop(engine);
+                debug_log(&format!(
+                    "OnKeyDown: vk=0x{:02X} not consumed in {:?}, passing",
+                    vk, state
+                ));
+            }
             return Ok(FALSE);
-        };
+        }
+        // should_consume_key が true を返すのは command が Some のときのみ。
+        let command = command.expect("should_consume_key guarantees Some");
 
         debug_log(&format!(
             "OnKeyDown: vk=0x{:02X}, command={:?}",
             vk, command
         ));
 
-        let mut engine = self.engine.lock().unwrap();
-        // Direct 状態では文字入力キー以外は消費せずアプリに委ねる（OnTestKeyDown と整合）。
-        if engine.state() == EngineState::Direct && !key_mapping::is_character_key(vk, &modifiers) {
-            drop(engine);
-            debug_log(&format!(
-                "OnKeyDown: vk=0x{:02X} not consumed in Direct state, passing",
-                vk
-            ));
-            return Ok(FALSE);
-        }
         let output = engine.process(command);
         drop(engine);
 
