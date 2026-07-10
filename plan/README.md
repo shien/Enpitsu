@@ -16,6 +16,7 @@ Windows 向け日本語入力システム (IME) を段階的に構築する。
 - [x] Phase 7.5: Emacs キーバインド（`keybind_preset`: none/minimal/emacs）
 - [ ] Phase 7: MeCab/形態素解析による連文節変換（**未着手**）
 - [ ] Phase 8: AI 辞書・設定生成（**未着手**）
+- [ ] Phase 9: インストーラ整備（Windows / Linux）（**未着手**）
 
 > **メモ:** Phase 7（連文節変換）は規模が大きいため後回しにし、先に Phase 7.5（Emacs
 > キーバインド）を実装した。番号順と実装順が前後している点に注意。
@@ -32,6 +33,7 @@ Windows 向け日本語入力システム (IME) を段階的に構築する。
 | [Phase 7.5](./phase7.5-emacs-keybind.md) | Emacs キーバインドの追加 | Ctrl+キーによるホームポジション操作 | ✅ 完了 |
 | [Phase 7](./phase7-mecab.md) | MeCab/形態素解析による高機能変換 | 連文節変換・予測変換 | ⬜ 未着手 |
 | [Phase 8](./phase8-ai-dict.md) | AI 辞書・設定生成 | AI で生成した辞書・テーブルによるオフライン高機能化 | ⬜ 未着手 |
+| [Phase 9](./phase9-installer.md) | インストーラ整備 | Windows/Linux 両対応のインストールスクリプト・XDG 準拠パス | ⬜ 未着手 |
 
 ### Phase 5 の残タスク
 
