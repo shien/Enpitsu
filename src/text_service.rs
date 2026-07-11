@@ -268,7 +268,7 @@ impl TextService {
         debug_log("TextService::new() called");
 
         // 設定ファイルの読み込み
-        let config_path = get_appdata_path("config.toml");
+        let config_path = crate::paths::config_file();
         debug_log(&format!("Loading config from: {:?}", config_path));
         let config = Config::load(&config_path).unwrap_or_else(|_| {
             debug_log("Config load failed, using defaults");
@@ -286,7 +286,7 @@ impl TextService {
         debug_log(&format!("System dict loaded: {}", dict.is_some()));
 
         // ユーザー辞書の読み込み
-        let user_dict_path = get_appdata_path("user_dict.txt");
+        let user_dict_path = crate::paths::user_dict_file();
         let user_dict = if config.auto_learn {
             UserDictionary::load(&user_dict_path).ok()
         } else {
@@ -546,7 +546,7 @@ impl ITfTextInputProcessor_Impl for TextService_Impl {
         let mut engine = self.engine.lock().unwrap();
         if let Some(ud) = engine.user_dict_mut() {
             if ud.is_dirty() {
-                let path = get_appdata_path("user_dict.txt");
+                let path = crate::paths::user_dict_file();
                 let _ = ud.save(&path);
             }
         }
@@ -719,14 +719,6 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
             Ok(FALSE)
         }
     }
-}
-
-/// %APPDATA%\enpitsu\ 以下のパスを返す。
-fn get_appdata_path(filename: &str) -> std::path::PathBuf {
-    let appdata = std::env::var("APPDATA").unwrap_or_else(|_| ".".to_string());
-    std::path::PathBuf::from(appdata)
-        .join("enpitsu")
-        .join(filename)
 }
 
 /// キーボードの現在の修飾キー状態を取得する。

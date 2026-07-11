@@ -32,6 +32,15 @@ impl std::fmt::Display for ConfigError {
     }
 }
 
+/// 設定ファイル初期化の結果。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InitResult {
+    /// 新規にファイルを作成した。
+    Created,
+    /// 既にファイルが存在したため何もしなかった。
+    AlreadyExists,
+}
+
 /// 入力モード切り替えキー。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ToggleKey {
@@ -200,6 +209,23 @@ auto_learn = true
 "#
         .to_string()
     }
+
+    /// 指定パスにデフォルト設定ファイルを書き出す。
+    ///
+    /// 既存ファイルがある場合は上書きせず `InitResult::AlreadyExists` を返す。
+    /// 親ディレクトリが無ければ作成する。
+    pub fn init_file(path: &Path) -> Result<InitResult, ConfigError> {
+        if path.exists() {
+            return Ok(InitResult::AlreadyExists);
+        }
+        if let Some(parent) = path.parent()
+            && !parent.as_os_str().is_empty()
+        {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(path, Self::default_toml())?;
+        Ok(InitResult::Created)
+    }
 }
 
 fn parse_toggle_key(value: &str) -> Result<ToggleKey, ConfigError> {
@@ -346,6 +372,77 @@ toggle_key = "invalid-key"
         let toml = Config::default_toml();
         let config = Config::parse(&toml).unwrap();
         assert_eq!(config, Config::default_config());
+    }
+
+    // === init_file ===
+
+    fn unique_temp_dir(name: &str) -> std::path::PathBuf {
+        let unique = format!(
+            "enpitsu_init_test_{}_{}",
+            name,
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        std::env::temp_dir().join(unique)
+    }
+
+    #[test]
+    fn init_config_creates_file() {
+        let dir = unique_temp_dir("creates");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.toml");
+
+        let result = Config::init_file(&path).unwrap();
+        assert_eq!(result, InitResult::Created);
+        assert!(path.exists());
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            Config::default_toml()
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn init_config_creates_parent_dirs() {
+        let dir = unique_temp_dir("parents");
+        // dir 自体・中間ディレクトリを未作成のまま渡す
+        let path = dir.join("nested").join("config.toml");
+
+        let result = Config::init_file(&path).unwrap();
+        assert_eq!(result, InitResult::Created);
+        assert!(path.exists());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn init_config_does_not_overwrite() {
+        let dir = unique_temp_dir("nooverwrite");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.toml");
+        std::fs::write(&path, "既存の内容").unwrap();
+
+        let result = Config::init_file(&path).unwrap();
+        assert_eq!(result, InitResult::AlreadyExists);
+        // 内容が保持されていること
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "既存の内容");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn init_config_result_roundtrip() {
+        let dir = unique_temp_dir("roundtrip");
+        let path = dir.join("config.toml");
+
+        Config::init_file(&path).unwrap();
+        let config = Config::load(&path).unwrap();
+        assert_eq!(config, Config::default_config());
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     // === keybind_preset パース ===

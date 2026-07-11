@@ -6,6 +6,7 @@ pub mod guids;
 pub mod input_state;
 pub mod katakana;
 pub mod key_mapping;
+pub mod paths;
 pub mod romaji;
 pub mod user_dictionary;
 
