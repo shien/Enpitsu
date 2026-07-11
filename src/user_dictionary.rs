@@ -102,6 +102,11 @@ impl UserDictionary {
     pub fn is_dirty(&self) -> bool {
         self.dirty
     }
+
+    /// 登録エントリが1件も無ければ true。
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
 }
 
 impl Default for UserDictionary {
@@ -130,6 +135,14 @@ mod tests {
         let result = ud.lookup("かんじ").unwrap();
         assert_eq!(result, &["漢字"]);
         assert!(ud.is_dirty());
+    }
+
+    #[test]
+    fn is_empty_reflects_entries() {
+        let mut ud = UserDictionary::new();
+        assert!(ud.is_empty());
+        ud.record("かんじ", "漢字");
+        assert!(!ud.is_empty());
     }
 
     #[test]

@@ -91,11 +91,13 @@ fn main() {
         None => None,
     };
 
-    let has_dict = dict.is_some();
+    // システム辞書・ユーザー辞書のいずれかに変換元があれば変換モードにする。
+    // （ユーザー辞書のみのインストールでも学習済みエントリを変換できるようにする）
+    let has_conversion = dict.is_some() || user_dict.as_ref().is_some_and(|ud| !ud.is_empty());
     let mut engine = ConversionEngine::new_with_user_dict(dict, user_dict);
 
     println!("Enpitsu - ローマ字→かな変換デモ");
-    if has_dict {
+    if has_conversion {
         println!("辞書検索モード: ローマ字を入力すると漢字候補も表示します。");
     }
     println!("ローマ字を入力して Enter で変換します。");
@@ -129,9 +131,9 @@ fn main() {
             );
         }
 
-        // 辞書ありの場合: Convert → 候補があれば表示してから Commit
-        // 辞書なしの場合: Commit でひらがな確定
-        if has_dict {
+        // 変換元ありの場合: Convert → 候補があれば表示してから Commit
+        // 変換元なしの場合: Commit でひらがな確定
+        if has_conversion {
             let output = engine.process(EngineCommand::Convert);
             if engine.candidates().is_some() {
                 // 候補あり: reading からひらがな・カタカナを表示
