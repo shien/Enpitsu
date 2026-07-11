@@ -1,5 +1,14 @@
 # Phase 9: インストーラ整備（Windows / Linux）
 
+> **状態: ✅ ほぼ完了（2026-07 時点）**
+> パス解決 (`src/paths.rs`)、設定初期化 (`src/config.rs` の `Config::init_file` / `InitResult`)、
+> CLI のデフォルトパス対応と `--init-config` (`src/main.rs`)、Linux インストーラ
+> (`installer/install.sh`) を実装・テスト済み（`cargo test` 304 passed、+11 件）。
+> Windows インストーラ (`installer/install.ps1`) は配置+登録方式・`-Uninstall`/`-Purge`/
+> `-DownloadDict` を実装済みだが、**Windows 実機での手動確認は未実施**（9.4 の動作確認）。
+> 辞書ダウンロード (9.6) は両スクリプトに実装済み（本環境では SKK 配布先が
+> ネットワークポリシーで 403 のため取得成功は未確認、失敗時のフォールバックは確認済み）。
+
 ## 目標
 
 Enpitsu を「ビルド済み成果物を所定の場所に配置し、すぐ使える状態にする」ためのインストーラを
