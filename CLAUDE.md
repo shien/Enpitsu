@@ -26,17 +26,19 @@ Enpitsu/
 │   ├── candidate.rs   # 変換候補リスト管理
 │   ├── engine.rs      # 変換エンジン (状態機械・コマンド処理・ユーザー辞書連携・カーソル移動)
 │   ├── key_mapping.rs # VirtualKey → EngineCommand 変換 (Ctrl+キー プリセット対応)
-│   ├── config.rs      # 設定ファイルのパース・デフォルト値 (keybind_preset 含む)
+│   ├── config.rs      # 設定ファイルのパース・デフォルト値・init_file (keybind_preset 含む)
+│   ├── paths.rs       # クロスプラットフォームなデフォルトパス解決 (Windows=%APPDATA%, Linux=XDG)
 │   ├── guids.rs       # CLSID, Profile GUID 定義
 │   ├── text_service.rs    # TSF TextService (Windows 専用、設定・ユーザー辞書連携)
 │   ├── class_factory.rs   # COM ClassFactory (Windows 専用)
 │   ├── registry.rs        # COM/TSF レジストリ登録 (Windows 専用)
-│   └── main.rs        # CLI デモ (変換エンジン対応、--user-dict オプション)
+│   └── main.rs        # CLI デモ (変換エンジン対応、--dict/--user-dict/--init-config)
 ├── tests/
 │   └── fixtures/
 │       └── test_dict.txt  # テスト用 SKK 辞書
 ├── installer/
-│   └── install.ps1    # Windows インストール/アンインストール
+│   ├── install.ps1    # Windows インストール/アンインストール
+│   └── install.sh     # Linux インストール/アンインストール (XDG 準拠)
 ├── dict/              # 辞書ファイル配置先 (.gitignore で除外)
 ├── plan/              # 開発計画ドキュメント
 ├── LICENSE
@@ -62,10 +64,21 @@ cargo build
 | `cargo clippy` | lint チェックを実行する |
 | `cargo fmt` | コードをフォーマットする |
 | `cargo fmt -- --check` | フォーマット差分があるかチェックする（CI向け） |
-| `cargo run` | CLI デモを起動する（ローマ字→かな変換） |
+| `cargo run` | CLI デモを起動する（設定・辞書をデフォルトパスから自動検出） |
 | `cargo run -- --dict <path>` | 辞書指定で CLI デモを起動する |
 | `cargo run -- --dict <path> --user-dict <path>` | 辞書・ユーザー辞書指定で CLI デモを起動する |
-| `cargo build --release` | リリースビルド（Windows DLL 生成） |
+| `cargo run -- --init-config` | デフォルト設定ファイルを生成する（既存ファイルは上書きしない） |
+| `cargo build --release` | リリースビルド（Windows DLL 生成 / Linux バイナリ生成） |
+
+### デフォルトパス（`src/paths.rs`）
+
+`--dict` / `--user-dict` を省略した場合、以下のパスを参照する。
+
+| 種別 | Windows | Linux (XDG) |
+|------|---------|-------------|
+| 設定 (`config.toml`) | `%APPDATA%\enpitsu\` | `$XDG_CONFIG_HOME/enpitsu`（既定 `~/.config/enpitsu`） |
+| 辞書 (`dict/SKK-JISYO.L`) | `%APPDATA%\enpitsu\dict\` | `$XDG_DATA_HOME/enpitsu/dict`（既定 `~/.local/share/enpitsu/dict`） |
+| ユーザー辞書 (`user_dict.txt`) | `%APPDATA%\enpitsu\` | `$XDG_DATA_HOME/enpitsu`（既定 `~/.local/share/enpitsu`） |
 
 ## Windows IME インストール
 
@@ -73,9 +86,26 @@ Windows 環境でのみ:
 
 ```powershell
 cargo build --release
-.\installer\install.ps1          # インストール（管理者権限）
-.\installer\install.ps1 -Uninstall  # アンインストール
+.\installer\install.ps1              # インストール（管理者権限、DLL/辞書/設定を配置・登録）
+.\installer\install.ps1 -DownloadDict # SKK 辞書もダウンロードして配置
+.\installer\install.ps1 -Uninstall   # アンインストール（設定は残す）
+.\installer\install.ps1 -Uninstall -Purge  # 設定・ユーザー辞書も削除
 ```
+
+## Linux インストール
+
+Linux 環境では CLI・辞書・設定を XDG 準拠で配置する（root 不要）:
+
+```sh
+cargo build --release
+./installer/install.sh               # ~/.local 以下にインストール（設定を自動生成）
+./installer/install.sh --download-dict # SKK 辞書もダウンロードして配置
+./installer/install.sh --uninstall   # アンインストール（設定は残す）
+./installer/install.sh --uninstall --purge  # 設定・ユーザー辞書も削除
+```
+
+> **注意:** Linux にはまだ IME エンジン（fcitx5 / IBus 連携）が無いため、
+> `install.sh` がセットアップするのは CLI デモと辞書・設定である。
 
 ## Windows IME 手動テスト
 

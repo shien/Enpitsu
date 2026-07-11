@@ -5,7 +5,7 @@ Windows 向け日本語入力システム (IME) を段階的に構築する。
 
 ## 現在の状態
 
-全テスト: **293 passed**（`cargo test`）
+全テスト: **304 passed**（`cargo test`）
 
 - [x] Phase 1: ローマ字→かな変換
 - [x] Phase 2: SKK 辞書の読み込みと検索
@@ -16,6 +16,7 @@ Windows 向け日本語入力システム (IME) を段階的に構築する。
 - [x] Phase 7.5: Emacs キーバインド（`keybind_preset`: none/minimal/emacs）
 - [ ] Phase 7: MeCab/形態素解析による連文節変換（**未着手**）
 - [ ] Phase 8: AI 辞書・設定生成（**未着手**）
+- [~] Phase 9: インストーラ整備（Windows / Linux）— `src/paths.rs`・`--init-config`・`installer/install.sh` は実装/テスト済み。Windows `install.ps1` は実機手動確認待ち
 
 > **メモ:** Phase 7（連文節変換）は規模が大きいため後回しにし、先に Phase 7.5（Emacs
 > キーバインド）を実装した。番号順と実装順が前後している点に注意。
@@ -32,6 +33,7 @@ Windows 向け日本語入力システム (IME) を段階的に構築する。
 | [Phase 7.5](./phase7.5-emacs-keybind.md) | Emacs キーバインドの追加 | Ctrl+キーによるホームポジション操作 | ✅ 完了 |
 | [Phase 7](./phase7-mecab.md) | MeCab/形態素解析による高機能変換 | 連文節変換・予測変換 | ⬜ 未着手 |
 | [Phase 8](./phase8-ai-dict.md) | AI 辞書・設定生成 | AI で生成した辞書・テーブルによるオフライン高機能化 | ⬜ 未着手 |
+| [Phase 9](./phase9-installer.md) | インストーラ整備 | Windows/Linux 両対応のインストールスクリプト・XDG 準拠パス | ✅ ほぼ完了 |
 
 ### Phase 5 の残タスク
 
@@ -47,6 +49,15 @@ Windows 向け日本語入力システム (IME) を段階的に構築する。
 
 - CI 設定（GitHub Actions）— `.github/workflows/` が未作成
 - `tracing` crate によるログ（現状は `OutputDebugString` の `[Enpitsu]` ログを使用）
+
+### Phase 9 の残タスク
+
+パス解決 (`src/paths.rs`)・`--init-config`・Linux インストーラ (`installer/install.sh`) は
+実装・テスト済み。以下は残タスク:
+
+- Windows インストーラ (`installer/install.ps1`) の実機手動確認（配置・登録・変換動作）
+- 辞書ダウンロード (`--download-dict` / `-DownloadDict`) の取得成功確認（現環境は SKK 配布先が 403）
+- パッケージ化（MSI / .deb / .rpm）は将来拡張（本フェーズのスコープ外）
 
 ## 調査事項
 
